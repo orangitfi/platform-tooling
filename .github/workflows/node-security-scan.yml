@@ -1,0 +1,88 @@
+# Node Security Scan
+#
+# Reusable workflow that runs three security scans in parallel against
+# Node.js / React / Next.js repositories:
+#
+#   1. gitleaks   — detects secrets committed to the repository
+#   2. npm audit  — detects known vulnerabilities in npm dependencies
+#   3. guarddog   — detects supply-chain threats in npm packages
+#
+# Intended to run as the first job in any consuming repository workflow,
+# before build, test, or deploy steps. All three jobs run in parallel;
+# the workflow fails if any one of them fails.
+#
+# Usage in a consuming repository:
+#
+#   jobs:
+#     security:
+#       uses: orangitfi/platform-tooling/.github/workflows/node-security-scan.yml@<sha>
+#       with:
+#         working-directory: ./src
+#
+# Consuming repo controls WHEN this runs. This workflow controls HOW.
+
+name: Node Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Directory containing package.json and package-lock.json"
+        required: false
+        default: "."
+        type: string
+      audit-level:
+        description: "Minimum severity for npm audit to fail on: low, moderate, high, critical"
+        required: false
+        default: "high"
+        type: string
+      fail-on-findings:
+        description: "Fail the workflow if any scan detects issues"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: Secret Scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks scan
+        uses: orangitfi/platform-tooling/.github/actions/gitleaks-scan@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+        with:
+          fail-on-findings: ${{ inputs.fail-on-findings }}
+
+  npm-audit:
+    name: Vulnerability Scan (npm audit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run npm audit
+        uses: orangitfi/platform-tooling/.github/actions/npm-audit@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          audit-level: ${{ inputs.audit-level }}
+          fail-on-findings: ${{ inputs.fail-on-findings }}
+
+  guarddog:
+    name: Supply Chain Scan (guarddog)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run guarddog npm scan
+        uses: orangitfi/platform-tooling/.github/actions/guarddog-npm-scan@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          fail-on-findings: ${{ inputs.fail-on-findings }}

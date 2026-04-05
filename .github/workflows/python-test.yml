@@ -1,0 +1,67 @@
+# Python Test
+#
+# Reusable workflow that installs dependencies with uv and runs pytest.
+#
+# uv sync --frozen installs all dependencies from the lockfile without
+# modifying it. The Python version is resolved from the project's
+# pyproject.toml / .python-version file by uv automatically.
+#
+# Usage in a consuming repository:
+#
+#   # Defaults: runs pytest from the repo root
+#   jobs:
+#     test:
+#       uses: orangitfi/platform-tooling/.github/workflows/python-test.yml@<sha>
+#
+#   # Custom test extras and command
+#   jobs:
+#     test:
+#       uses: orangitfi/platform-tooling/.github/workflows/python-test.yml@<sha>
+#       with:
+#         uv-sync-args: "--extra test"
+#         test-command:  "pytest tests/ -v --tb=short"
+
+name: Python Test
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Directory containing pyproject.toml"
+        required: false
+        default: "."
+        type: string
+      test-command:
+        description: "Command to run tests via uv run (e.g. pytest, pytest tests/ -v)"
+        required: false
+        default: "pytest"
+        type: string
+      uv-sync-args:
+        description: "Extra arguments passed to uv sync (e.g. --extra test --extra dev)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    name: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: orangitfi/platform-tooling/.github/actions/setup-uv@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: uv sync --frozen ${{ inputs.uv-sync-args }}
+
+      - name: Run tests
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: uv run ${{ inputs.test-command }}

@@ -1,0 +1,101 @@
+# DAST Scan (OWASP ZAP)
+#
+# Reusable workflow that runs an OWASP ZAP dynamic application security
+# scan against a live URL. Designed for nightly scheduled runs, but can
+# also be called post-deploy or on-demand.
+#
+# If target-url is not provided the entire job is skipped cleanly —
+# safe to wire into any pipeline even when no live URL is available.
+#
+# ZAP is pulled directly from the official pinned Docker image.
+# No third-party marketplace actions are used.
+#
+# Scan types:
+#   baseline  (default) — passive scan only, ~2 min, no traffic sent to the app
+#   full                — active scan, sends attack probes, 10-30 min
+#   api                 — OpenAPI/Swagger-aware passive scan
+#
+# A HTML + JSON report is always uploaded as an artifact when a scan runs.
+#
+# Usage — nightly baseline scan:
+#
+#   on:
+#     schedule:
+#       - cron: "0 3 * * *"   # 03:00 UTC every night
+#
+#   jobs:
+#     dast:
+#       uses: orangitfi/platform-tooling/.github/workflows/dast-scan.yml@<sha>
+#       with:
+#         target-url: https://staging.myapp.com
+#
+# Usage — skip when URL is not set (safe default for repos without staging):
+#
+#   jobs:
+#     dast:
+#       uses: orangitfi/platform-tooling/.github/workflows/dast-scan.yml@<sha>
+#       with:
+#         target-url: ${{ vars.STAGING_URL }}   # empty → scan skipped
+#
+# Usage — nightly full active scan with Slack notification on failure:
+#
+#   jobs:
+#     dast:
+#       uses: orangitfi/platform-tooling/.github/workflows/dast-scan.yml@<sha>
+#       with:
+#         target-url:      https://staging.myapp.com
+#         scan-type:       full
+#         fail-on-findings: true
+#       secrets:
+#         op-service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
+name: DAST Scan (OWASP ZAP)
+
+on:
+  workflow_call:
+    inputs:
+      target-url:
+        description: "URL of the running application to scan. Leave empty to skip."
+        required: false
+        default: ""
+        type: string
+      scan-type:
+        description: "Scan type: baseline (default, passive) | full (active) | api (OpenAPI-aware)"
+        required: false
+        default: "baseline"
+        type: string
+      openapi-spec:
+        description: "URL or repo-relative path of the OpenAPI spec — used only for api scan type. Defaults to {target-url}/openapi.json."
+        required: false
+        default: ""
+        type: string
+      fail-on-findings:
+        description: "Fail the workflow if ZAP reports any alerts"
+        required: false
+        default: true
+        type: boolean
+      artifact-name:
+        description: "Name of the uploaded HTML + JSON report artifact"
+        required: false
+        default: "zap-report"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  zap-scan:
+    name: OWASP ZAP ${{ inputs.scan-type }} Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run OWASP ZAP scan
+        uses: orangitfi/platform-tooling/.github/actions/owasp-zap-scan@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+        with:
+          target-url:       ${{ inputs.target-url }}
+          scan-type:        ${{ inputs.scan-type }}
+          openapi-spec:     ${{ inputs.openapi-spec }}
+          fail-on-findings: ${{ inputs.fail-on-findings }}
+          artifact-name:    ${{ inputs.artifact-name }}

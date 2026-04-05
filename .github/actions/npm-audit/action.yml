@@ -1,0 +1,104 @@
+name: "npm Audit"
+description: >
+  Run npm audit against a project's lockfile to detect known vulnerabilities
+  in dependencies. NPM_CONFIG_IGNORE_SCRIPTS=true is set for the entire step
+  to prevent lifecycle scripts from executing.
+
+inputs:
+  working-directory:
+    description: "Directory containing package.json and package-lock.json"
+    required: false
+    default: "."
+  audit-level:
+    description: "Minimum severity to fail on: low, moderate, high, or critical"
+    required: false
+    default: "high"
+  fail-on-findings:
+    description: "Fail the job if vulnerabilities at or above audit-level are found (default: true)"
+    required: false
+    default: "true"
+
+outputs:
+  result:
+    description: "Scan result: passed or failed"
+    value: ${{ steps.audit.outputs.result }}
+  vulnerabilities-found:
+    description: "Total number of vulnerabilities found"
+    value: ${{ steps.audit.outputs.vulnerabilities-found }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Run npm audit
+      id: audit
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        NPM_CONFIG_IGNORE_SCRIPTS: "true"
+        AUDIT_LEVEL:      ${{ inputs.audit-level }}
+        FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+      run: |
+        set -euo pipefail
+
+        REPORT="/tmp/npm-audit-report.json"
+
+        if [ ! -f "package-lock.json" ]; then
+          echo "::error::package-lock.json not found in $(pwd). npm audit requires a lockfile."
+          exit 1
+        fi
+
+        {
+          echo "## npm Audit"
+          echo ""
+          echo "| Setting | Value |"
+          echo "|---------|-------|"
+          echo "| Working directory | \`${{ inputs.working-directory }}\` |"
+          echo "| Audit level | \`${AUDIT_LEVEL}\` |"
+          echo "| npm version | \`$(npm --version)\` |"
+          echo "| Ignore scripts | \`true\` |"
+          echo ""
+        } >> "${GITHUB_STEP_SUMMARY}"
+
+        EXIT_CODE=0
+        npm audit --audit-level="${AUDIT_LEVEL}" --json 1>"${REPORT}" || EXIT_CODE=$?
+
+        TOTAL=0
+        if command -v jq >/dev/null 2>&1 && [ -f "${REPORT}" ]; then
+          TOTAL="$(jq '.metadata.vulnerabilities.total // 0' "${REPORT}")"
+        fi
+
+        if [ "${EXIT_CODE}" -eq 0 ]; then
+          echo "result=passed"           >> "${GITHUB_OUTPUT}"
+          echo "vulnerabilities-found=0" >> "${GITHUB_OUTPUT}"
+          echo "No vulnerabilities found at or above \`${AUDIT_LEVEL}\` severity." >> "${GITHUB_STEP_SUMMARY}"
+        else
+          echo "result=failed"                      >> "${GITHUB_OUTPUT}"
+          echo "vulnerabilities-found=${TOTAL}"     >> "${GITHUB_OUTPUT}"
+
+          # Re-run without --json for human-readable output in the summary
+          HUMAN_OUTPUT="$(npm audit --audit-level="${AUDIT_LEVEL}" 2>&1 || true)"
+
+          {
+            echo "**${TOTAL} vulnerability/vulnerabilities found at or above \`${AUDIT_LEVEL}\` severity.**"
+            echo ""
+            echo "<details><summary>Audit output</summary>"
+            echo ""
+            echo '```'
+            echo "${HUMAN_OUTPUT}"
+            echo '```'
+            echo ""
+            echo "</details>"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [ "${FAIL_ON_FINDINGS}" = "true" ]; then
+            echo "::error::npm audit found ${TOTAL} vulnerabilities. See the job summary for details."
+            exit 1
+          else
+            echo "::warning::npm audit found ${TOTAL} vulnerabilities (scan is non-blocking)."
+          fi
+        fi
+
+    - name: Cleanup
+      if: always()
+      shell: bash
+      run: rm -f /tmp/npm-audit-report.json

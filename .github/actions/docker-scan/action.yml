@@ -1,0 +1,135 @@
+name: "Docker Security Scan"
+description: "Build and scan a Docker image using Grype and Syft for security vulnerabilities"
+# This action builds a Docker image and scans it for security vulnerabilities
+# using Grype and generates an SBOM (Software Bill of Materials) using Syft
+#
+# Example usage in your workflow:
+#
+# jobs:
+#   security-scan:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: ./.github/actions/docker-scan
+#         with:
+#           working-directory: '.'
+#           dockerfile-path: './Dockerfile'
+#           image-name: 'myapp'
+#           image-tag: ${{ github.sha }}
+#           fail-on-severity: 'high'
+#
+# Required inputs:
+# - working-directory: Directory containing your source code and Dockerfile
+# - dockerfile-path: Path to your Dockerfile relative to working-directory
+# - image-name: Name for your Docker image (local only, not pushed)
+# - image-tag: Version tag for the image
+#
+# Optional inputs:
+# - fail-on-severity: Minimum severity to fail the build (critical, high, medium, low, negligible)
+
+inputs:
+  working-directory:
+    description: "Path to the directory containing Dockerfile and source code"
+    required: true
+  dockerfile-path:
+    description: "Relative path to the Dockerfile (from working directory)"
+    required: true
+  image-name:
+    description: "Name of the Docker image (e.g., myapp)"
+    required: true
+  image-tag:
+    description: "Docker image tag (e.g., latest, 1.0.0, commit-SHA)"
+    required: true
+    default: "latest"
+  fail-on-severity:
+    description: "Fail on vulnerabilities of this severity or higher (critical, high, medium, low, negligible)"
+    required: false
+    default: "high"
+
+outputs:
+  scan-result:
+    description: "Result of the security scan (passed/failed)"
+    value: ${{ steps.scan.outputs.result }}
+  vulnerabilities-found:
+    description: "Number of vulnerabilities found"
+    value: ${{ steps.scan.outputs.vulnerabilities }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+
+    - name: Build Docker Image
+      shell: bash
+      run: |
+        echo "Building Docker image: ${{ inputs.image-name }}:${{ inputs.image-tag }}"
+        docker build -f "${{ inputs.dockerfile-path }}" -t "${{ inputs.image-name }}:${{ inputs.image-tag }}" .
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Install Syft
+      # Pinned to v0.23.1 (SHA 57aae52) which bundles Syft v1.42.2.
+      # Using the official action avoids curl|sh from unpinned installer scripts.
+      uses: anchore/sbom-action/download-syft@57aae528053a48a3f6235f2d9461b05fbcb7366d  # v0.23.1
+
+    - name: Generate SBOM with Syft
+      shell: bash
+      run: |
+        echo "Generating SBOM for ${{ inputs.image-name }}:${{ inputs.image-tag }}"
+        syft "${{ inputs.image-name }}:${{ inputs.image-tag }}" -o json > sbom.json
+        syft "${{ inputs.image-name }}:${{ inputs.image-tag }}" -o spdx-json > sbom-spdx.json
+        syft "${{ inputs.image-name }}:${{ inputs.image-tag }}" -o cyclonedx-json > sbom-cyclonedx.json
+        echo "SBOM generated successfully"
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Install Grype
+      # Download the release tarball directly and verify its checksum.
+      # This avoids the curl|sh installer script which fetches from an unpinned main branch.
+      shell: bash
+      run: |
+        curl -sSfL -o /tmp/grype.tar.gz \
+          "https://github.com/anchore/grype/releases/download/v0.109.0/grype_0.109.0_linux_amd64.tar.gz"
+        echo "c06e79287aa4d7343d7937571cf33154b560cbe483c6897369c53e2970fae647  /tmp/grype.tar.gz" \
+          | sha256sum -c -
+        tar -xzf /tmp/grype.tar.gz -C /usr/local/bin grype
+        rm /tmp/grype.tar.gz
+
+    - name: Run Security Scan with Grype
+      id: scan
+      shell: bash
+      run: |
+        echo "Scanning for vulnerabilities with minimum severity: ${{ inputs.fail-on-severity }}"
+
+        # Run scan and capture results
+        GRYPE_OUTPUT=$(grype sbom:sbom.json --only-fixed --fail-on "${{ inputs.fail-on-severity }}" -o table 2>&1) && GRYPE_EXIT=0 || GRYPE_EXIT=$?
+        echo "$GRYPE_OUTPUT"
+        # Count vulnerability lines (non-header rows in table output)
+        VULN_COUNT=$(echo "$GRYPE_OUTPUT" | grep -v "^NAME" | grep -c "." || true)
+        if [ "$GRYPE_EXIT" -eq 0 ]; then
+          echo "result=passed" >> $GITHUB_OUTPUT
+          echo "vulnerabilities=${VULN_COUNT}" >> $GITHUB_OUTPUT
+          echo "✅ Security scan passed - no vulnerabilities found above ${{ inputs.fail-on-severity }} severity"
+        else
+          echo "result=failed" >> $GITHUB_OUTPUT
+          echo "vulnerabilities=${VULN_COUNT}" >> $GITHUB_OUTPUT
+          echo "⚠️ Security scan found vulnerabilities at or above ${{ inputs.fail-on-severity }} severity"
+          exit 1
+        fi
+      working-directory: ${{ inputs.working-directory }}
+
+    - name: Upload SBOM as Artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom-${{ inputs.image-name }}-${{ inputs.image-tag }}
+        path: |
+          ${{ inputs.working-directory }}/sbom*.json
+        retention-days: 90
+
+    - name: Clean up
+      if: always()
+      shell: bash
+      run: |
+        rm -f sbom.json sbom-spdx.json sbom-cyclonedx.json
+        docker rmi "${{ inputs.image-name }}:${{ inputs.image-tag }}" || true
+      working-directory: ${{ inputs.working-directory }}

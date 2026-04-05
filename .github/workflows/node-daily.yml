@@ -1,0 +1,149 @@
+# Node Daily Security
+#
+# Reusable workflow for a daily security status run against a Node.js project.
+# Combines the full CI pipeline with an OWASP ZAP DAST scan in parallel:
+#
+#   ci    — full node-ci pipeline (security + lint + build + test + vuln scan)
+#   dast  — OWASP ZAP scan against the live staging/production URL
+#
+# Both jobs run in parallel. CI checks the current code and dependencies;
+# ZAP checks the running application. They are independent — a build failure
+# does not prevent the DAST scan from running, and vice versa.
+#
+# If target-url is not provided the dast job is skipped cleanly.
+#
+# The consuming repo controls WHEN this runs (typically a nightly schedule).
+# This workflow controls HOW.
+#
+# Usage in a consuming repository:
+#
+#   on:
+#     schedule:
+#       - cron: "0 3 * * *"   # 03:00 UTC every night
+#     workflow_dispatch:       # allow manual trigger
+#
+#   jobs:
+#     daily:
+#       uses: orangitfi/platform-tooling/.github/workflows/node-daily.yml@<sha>
+#       with:
+#         image-name: my-app
+#         target-url: https://staging.myapp.com
+#
+# See node-daily.md for full documentation and all parameter options.
+#
+# ─── SHA pinning ─────────────────────────────────────────────────────────────
+# After committing this file, replace b671c309c4bd5eea9927e0f93173a25819b20461 with the new commit SHA.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Daily Security
+
+on:
+  workflow_call:
+    inputs:
+      # ── CI inputs ────────────────────────────────────────────────────────
+      working-directory:
+        description: "Directory containing package.json"
+        required: false
+        default: "."
+        type: string
+      audit-level:
+        description: "Minimum npm audit severity to fail on: low, moderate, high, critical"
+        required: false
+        default: "high"
+        type: string
+      dockerfile-path:
+        description: "Path to the Dockerfile relative to the repo root"
+        required: false
+        default: "Dockerfile"
+        type: string
+      build-command:
+        description: "npm script name for the build"
+        required: false
+        default: "build"
+        type: string
+      test-command:
+        description: "npm script name for unit tests"
+        required: false
+        default: "test:unit"
+        type: string
+      run-playwright:
+        description: "Run Playwright tests in the CI test job"
+        required: false
+        default: true
+        type: boolean
+      playwright-command:
+        description: "npm script for Playwright in the CI test job"
+        required: false
+        default: "test:e2e"
+        type: string
+      image-name:
+        description: "Docker image name for the vulnerability scan"
+        required: false
+        default: ""
+        type: string
+      run-docker-scan:
+        description: "Build and scan the Docker image in the vulnerability scan"
+        required: false
+        default: true
+        type: boolean
+      fail-on-severity:
+        description: "Minimum Grype severity for the vulnerability scan"
+        required: false
+        default: "high"
+        type: string
+      # ── DAST inputs ──────────────────────────────────────────────────────
+      target-url:
+        description: "URL of the running application to scan with ZAP. Leave empty to skip DAST."
+        required: false
+        default: ""
+        type: string
+      scan-type:
+        description: "ZAP scan type: baseline (passive, ~2 min) | full (active, 10-30 min) | api"
+        required: false
+        default: "baseline"
+        type: string
+      openapi-spec:
+        description: "OpenAPI spec URL or path — used only when scan-type is api"
+        required: false
+        default: ""
+        type: string
+      dast-fail-on-findings:
+        description: "Fail the DAST job if ZAP reports any alerts"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # Full CI pipeline — static security, lint, build, test, vulnerability scan
+  # ───────────────────────────────────────────────────────────────────────────
+  ci:
+    name: CI
+    uses: orangitfi/platform-tooling/.github/workflows/node-ci.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    with:
+      working-directory:  ${{ inputs.working-directory }}
+      audit-level:        ${{ inputs.audit-level }}
+      dockerfile-path:    ${{ inputs.dockerfile-path }}
+      build-command:      ${{ inputs.build-command }}
+      test-command:       ${{ inputs.test-command }}
+      run-playwright:     ${{ inputs.run-playwright }}
+      playwright-command: ${{ inputs.playwright-command }}
+      image-name:         ${{ inputs.image-name }}
+      run-docker-scan:    ${{ inputs.run-docker-scan }}
+      fail-on-severity:   ${{ inputs.fail-on-severity }}
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # DAST — dynamic scan against the live URL (skipped if target-url is empty)
+  # ───────────────────────────────────────────────────────────────────────────
+  dast:
+    name: DAST (OWASP ZAP)
+    uses: orangitfi/platform-tooling/.github/workflows/dast-scan.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    with:
+      target-url:       ${{ inputs.target-url }}
+      scan-type:        ${{ inputs.scan-type }}
+      openapi-spec:     ${{ inputs.openapi-spec }}
+      fail-on-findings: ${{ inputs.dast-fail-on-findings }}
+      artifact-name:    zap-daily-report

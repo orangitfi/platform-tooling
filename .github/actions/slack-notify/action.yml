@@ -1,0 +1,98 @@
+name: "Slack Notify"
+description: >
+  Read a Slack webhook URL from 1Password and post a workflow status
+  notification. Workflow name, repository, branch, commit, and run URL
+  are populated automatically from the GitHub environment.
+  OP_SERVICE_ACCOUNT_TOKEN must be set in the calling step's env.
+
+inputs:
+  slack-webhook-op-ref:
+    description: "1Password reference to the Slack webhook URL (e.g. op://vault/item/field)"
+    required: true
+  status:
+    description: "Workflow status to report: success, failure, or cancelled"
+    required: true
+  message:
+    description: "Optional extra message to include (e.g. deploy version, PR title)"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install 1Password CLI
+      uses: 1password/install-cli-action@9a0c9dd934086b7ab1d90115d455bda1c53c2bdb  # v2
+
+    - name: Read Slack webhook from 1Password
+      shell: bash
+      run: |
+        SLACK_WEBHOOK_URL="$(op read '${{ inputs.slack-webhook-op-ref }}')"
+        echo "::add-mask::${SLACK_WEBHOOK_URL}"
+        echo "SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}" >> "${GITHUB_ENV}"
+
+    - name: Post notification to Slack
+      shell: bash
+      env:
+        STATUS:         ${{ inputs.status }}
+        CUSTOM_MESSAGE: ${{ inputs.message }}
+      run: |
+        set -euo pipefail
+
+        case "${STATUS}" in
+          success)   EMOJI="✅"; COLOR="#36a64f"; LABEL="Succeeded" ;;
+          failure)   EMOJI="❌"; COLOR="#dc3545"; LABEL="Failed"    ;;
+          cancelled) EMOJI="⚠️"; COLOR="#ffc107"; LABEL="Cancelled" ;;
+          *)         EMOJI="ℹ️"; COLOR="#6c757d"; LABEL="${STATUS}" ;;
+        esac
+
+        RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+        SHORT_SHA="${GITHUB_SHA:0:7}"
+
+        # Build the Slack payload using jq so all values are properly escaped
+        PAYLOAD="$(jq -n \
+          --arg emoji          "${EMOJI}" \
+          --arg workflow       "${GITHUB_WORKFLOW}" \
+          --arg label          "${LABEL}" \
+          --arg color          "${COLOR}" \
+          --arg repo           "${GITHUB_REPOSITORY}" \
+          --arg repo_url       "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+          --arg branch         "${GITHUB_REF_NAME}" \
+          --arg sha            "${SHORT_SHA}" \
+          --arg run_url        "${RUN_URL}" \
+          --arg message        "${CUSTOM_MESSAGE}" \
+          '{
+            text: "\($emoji) \($workflow) \($label)",
+            attachments: [{
+              color: $color,
+              blocks: (
+                [
+                  {
+                    type: "section",
+                    text: {
+                      type: "mrkdwn",
+                      text: "\($emoji) *\($workflow)* \($label)\n*Repository:* <\($repo_url)|\($repo)>\n*Branch:* `\($branch)`\n*Commit:* `\($sha)`"
+                    }
+                  }
+                ]
+                + (if $message != "" then [{
+                    type: "section",
+                    text: { type: "mrkdwn", text: $message }
+                  }] else [] end)
+                + [{
+                    type: "actions",
+                    elements: [{
+                      type: "button",
+                      text: { type: "plain_text", text: "View Run" },
+                      url: $run_url
+                    }]
+                  }]
+              )
+            }]
+          }'
+        )"
+
+        curl -sSfL \
+          -X POST \
+          -H "Content-Type: application/json" \
+          -d "${PAYLOAD}" \
+          "${SLACK_WEBHOOK_URL}"

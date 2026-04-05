@@ -1,0 +1,196 @@
+# Node CI
+#
+# Reusable workflow that wires together the full Node.js CI pipeline:
+#
+#   security  — gitleaks + npm-audit + guarddog (gates everything below)
+#   lint      — npm lint + hadolint               ┐
+#   build     — npm ci + npm run build            ├─ parallel after security
+#   test      — unit tests + optional Playwright  ┘
+#   functional-e2e  — optional Playwright e2e (opt-in, off by default)
+#   visual-test     — optional visual regression  (opt-in, off by default)
+#   vulnerability-scan — Syft + Grype (after all above pass or are skipped)
+#
+# The consuming repo controls WHEN this runs. This workflow controls HOW.
+#
+# Usage in a consuming repository:
+#
+#   on: [push, pull_request, workflow_dispatch]
+#
+#   jobs:
+#     ci:
+#       uses: orangitfi/platform-tooling/.github/workflows/node-ci.yml@<sha>
+#       with:
+#         image-name: my-app
+#
+# See node-ci.md for full documentation and all parameter options.
+#
+# ─── SHA pinning ─────────────────────────────────────────────────────────────
+# The `uses:` lines below reference platform-tooling workflows at a specific
+# SHA. After committing this file, run the SHA bump process documented in the
+# root README to update b671c309c4bd5eea9927e0f93173a25819b20461 to the commit that introduced this file.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: CI
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Directory containing package.json"
+        required: false
+        default: "."
+        type: string
+      audit-level:
+        description: "Minimum npm audit severity to fail on: low, moderate, high, critical"
+        required: false
+        default: "high"
+        type: string
+      dockerfile-path:
+        description: "Path to the Dockerfile relative to the repo root (used by lint and vulnerability scan)"
+        required: false
+        default: "Dockerfile"
+        type: string
+      lint-command:
+        description: "npm script name for linting"
+        required: false
+        default: "lint"
+        type: string
+      build-command:
+        description: "npm script name for the build"
+        required: false
+        default: "build"
+        type: string
+      test-command:
+        description: "npm script name for unit tests"
+        required: false
+        default: "test:unit"
+        type: string
+      run-playwright:
+        description: "Run Playwright tests in the test job"
+        required: false
+        default: true
+        type: boolean
+      playwright-command:
+        description: "npm script for Playwright in the test job"
+        required: false
+        default: "test:e2e"
+        type: string
+      run-functional-e2e:
+        description: "Enable the functional-e2e job (requires a live backend; off by default)"
+        required: false
+        default: false
+        type: boolean
+      functional-e2e-command:
+        description: "npm script for functional e2e tests"
+        required: false
+        default: "test:e2e:functional"
+        type: string
+      run-visual-test:
+        description: "Enable the visual-test job (requires committed baselines; off by default)"
+        required: false
+        default: false
+        type: boolean
+      visual-test-command:
+        description: "npm script for visual regression tests"
+        required: false
+        default: "test:e2e:visual"
+        type: string
+      fail-on-severity:
+        description: "Minimum Grype severity for the vulnerability scan: critical, high, medium, low, negligible"
+        required: false
+        default: "high"
+        type: string
+      run-docker-scan:
+        description: "Build and scan the Docker image in the vulnerability scan (set false for repos without a Dockerfile)"
+        required: false
+        default: true
+        type: boolean
+      image-name:
+        description: "Docker image name for the vulnerability scan. Defaults to the repository name."
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # 1. Security audit — runs first, gates everything else
+  # ───────────────────────────────────────────────────────────────────────────
+  security:
+    name: Security Scan
+    uses: orangitfi/platform-tooling/.github/workflows/node-security-scan.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    with:
+      working-directory: ${{ inputs.working-directory }}
+      audit-level:       ${{ inputs.audit-level }}
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 2. Lint + Build + Test — parallel after security passes
+  # ───────────────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    needs: security
+    uses: orangitfi/platform-tooling/.github/workflows/node-lint.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    with:
+      working-directory: ${{ inputs.working-directory }}
+      lint-command:      ${{ inputs.lint-command }}
+      dockerfile-path:   ${{ inputs.dockerfile-path }}
+
+  build:
+    name: Build
+    needs: security
+    uses: orangitfi/platform-tooling/.github/workflows/node-build.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    with:
+      working-directory: ${{ inputs.working-directory }}
+      build-command:     ${{ inputs.build-command }}
+
+  test:
+    name: Test
+    needs: security
+    uses: orangitfi/platform-tooling/.github/workflows/node-test.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    with:
+      working-directory: ${{ inputs.working-directory }}
+      run-unit-tests:    true
+      test-command:      ${{ inputs.test-command }}
+      run-playwright:    ${{ inputs.run-playwright }}
+      playwright-command: ${{ inputs.playwright-command }}
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 3. Optional jobs — skipped when disabled; vulnerability-scan still runs
+  # ───────────────────────────────────────────────────────────────────────────
+  functional-e2e:
+    name: Functional E2E
+    if: ${{ inputs.run-functional-e2e }}
+    needs: security
+    uses: orangitfi/platform-tooling/.github/workflows/node-test.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    with:
+      working-directory:  ${{ inputs.working-directory }}
+      run-unit-tests:     false
+      run-playwright:     true
+      playwright-command: ${{ inputs.functional-e2e-command }}
+
+  visual-test:
+    name: Visual Regression Test
+    if: ${{ inputs.run-visual-test }}
+    needs: security
+    uses: orangitfi/platform-tooling/.github/workflows/node-test.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    with:
+      working-directory:  ${{ inputs.working-directory }}
+      run-unit-tests:     false
+      run-playwright:     true
+      playwright-command: ${{ inputs.visual-test-command }}
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 4. Vulnerability scan — runs after all quality gates pass or are skipped
+  # ───────────────────────────────────────────────────────────────────────────
+  vulnerability-scan:
+    name: Vulnerability Scan
+    needs: [lint, build, test, functional-e2e, visual-test]
+    uses: orangitfi/platform-tooling/.github/workflows/node-vulnerability-scan.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    with:
+      working-directory: ${{ inputs.working-directory }}
+      fail-on-severity:  ${{ inputs.fail-on-severity }}
+      run-docker-scan:   ${{ inputs.run-docker-scan }}
+      dockerfile-path:   ${{ inputs.dockerfile-path }}
+      image-name:        ${{ inputs.image-name }}

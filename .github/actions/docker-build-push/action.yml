@@ -1,0 +1,96 @@
+name: "Docker Build & Push"
+description: "Build the Docker image, scan it with Syft/Grype, push to Artifact Registry on success"
+
+inputs:
+  project_id:
+    description: "GCP project ID"
+    required: true
+  region:
+    description: "GCP region of the Artifact Registry and Cloud Run Job"
+    required: false
+    default: "europe-north1"
+  image_name:
+    description: "Image name (without registry prefix or tag)"
+    required: false
+    default: "invoicing-migrator"
+  registry_repo:
+    description: "Artifact Registry repository name"
+    required: false
+    default: "invoicing-migrator"
+  context:
+    description: "Docker build context path relative to repo root"
+    required: false
+    default: "src/sevendos_invoicing_migrator"
+  sha:
+    description: "Git commit SHA used for the pinned image tag"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set image variables
+      shell: bash
+      run: |
+        REGISTRY="${{ inputs.region }}-docker.pkg.dev/${{ inputs.project_id }}/${{ inputs.registry_repo }}"
+        IMAGE_BASE="${REGISTRY}/${{ inputs.image_name }}"
+        echo "IMAGE_BASE=${IMAGE_BASE}" >> "$GITHUB_ENV"
+        echo "IMAGE_SHA=${IMAGE_BASE}:git-${{ inputs.sha }}" >> "$GITHUB_ENV"
+        echo "IMAGE_LATEST=${IMAGE_BASE}:latest" >> "$GITHUB_ENV"
+        echo "IMAGE_TEST=${IMAGE_BASE}:git-${{ inputs.sha }}-test" >> "$GITHUB_ENV"
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+
+    - name: Build Docker image
+      shell: bash
+      run: |
+        docker build \
+          -f Dockerfile \
+          -t "$IMAGE_TEST" \
+          .
+      working-directory: ${{ inputs.context }}
+
+    - name: Install Syft
+      # Pinned to v0.23.1 (SHA 57aae52) which bundles Syft v1.42.2.
+      # Using the official action avoids curl|sh from unpinned installer scripts.
+      uses: anchore/sbom-action/download-syft@57aae528053a48a3f6235f2d9461b05fbcb7366d  # v0.23.1
+
+    - name: Install Grype
+      # Download the release tarball directly and verify its checksum.
+      # This avoids the curl|sh installer script which fetches from an unpinned main branch.
+      shell: bash
+      run: |
+        curl -sSfL -o /tmp/grype.tar.gz \
+          "https://github.com/anchore/grype/releases/download/v0.109.0/grype_0.109.0_linux_amd64.tar.gz"
+        echo "c06e79287aa4d7343d7937571cf33154b560cbe483c6897369c53e2970fae647  /tmp/grype.tar.gz" \
+          | sha256sum -c -
+        tar -xzf /tmp/grype.tar.gz -C /usr/local/bin grype
+        rm /tmp/grype.tar.gz
+
+    - name: Generate SBOM with Syft
+      shell: bash
+      run: |
+        syft "$IMAGE_TEST" -o json > sbom.json
+      working-directory: ${{ inputs.context }}
+
+    - name: Run Security Scan with Grype
+      shell: bash
+      run: |
+        grype sbom:sbom.json --only-fixed --fail-on high
+      working-directory: ${{ inputs.context }}
+
+    - name: Tag and push Docker image
+      shell: bash
+      run: |
+        docker tag "$IMAGE_TEST" "$IMAGE_SHA"
+        docker tag "$IMAGE_TEST" "$IMAGE_LATEST"
+        docker push "$IMAGE_SHA"
+        docker push "$IMAGE_LATEST"
+
+    - name: Remove test image and SBOM
+      if: always()
+      shell: bash
+      run: |
+        docker rmi "$IMAGE_TEST" || true
+        rm -f sbom.json
+      working-directory: ${{ inputs.context }}

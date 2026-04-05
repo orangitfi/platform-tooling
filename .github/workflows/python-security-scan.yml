@@ -1,0 +1,87 @@
+# Python Security Scan
+#
+# Reusable workflow that runs three security scans in parallel against
+# Python / uv repositories:
+#
+#   1. gitleaks   — detects secrets committed to the repository
+#   2. pip-audit  — detects known CVEs in Python dependencies (via uv lockfile)
+#   3. guarddog   — detects supply-chain threats in PyPI packages
+#
+# uv is installed in each job that requires it. All three jobs run in
+# parallel; the workflow fails if any one of them fails.
+#
+# Usage in a consuming repository:
+#
+#   jobs:
+#     security:
+#       uses: orangitfi/platform-tooling/.github/workflows/python-security-scan.yml@<sha>
+#       with:
+#         working-directory: .
+#
+# Consuming repo controls WHEN this runs. This workflow controls HOW.
+
+name: Python Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Directory containing pyproject.toml and uv.lock"
+        required: false
+        default: "."
+        type: string
+      fail-on-findings:
+        description: "Fail the workflow if any scan detects issues"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: Secret Scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks scan
+        uses: orangitfi/platform-tooling/.github/actions/gitleaks-scan@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+        with:
+          fail-on-findings: ${{ inputs.fail-on-findings }}
+
+  pip-audit:
+    name: Vulnerability Scan (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: orangitfi/platform-tooling/.github/actions/setup-uv@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+
+      - name: Run pip-audit
+        uses: orangitfi/platform-tooling/.github/actions/pip-audit@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          fail-on-findings: ${{ inputs.fail-on-findings }}
+
+  guarddog:
+    name: Supply Chain Scan (guarddog)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: orangitfi/platform-tooling/.github/actions/setup-uv@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+
+      - name: Run guarddog PyPI scan
+        uses: orangitfi/platform-tooling/.github/actions/guarddog-scan@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          fail-on-findings: ${{ inputs.fail-on-findings }}

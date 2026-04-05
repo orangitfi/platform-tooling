@@ -1,0 +1,95 @@
+# Python Lint
+#
+# Reusable workflow that runs lint jobs in parallel:
+#
+#   1. ruff    — runs ruff check (lint) and/or ruff format --check
+#                both enabled by default, each can be disabled independently
+#   2. docker-lint — runs hadolint against the Dockerfile
+#                    skipped cleanly if no Dockerfile is found
+#
+# Usage in a consuming repository:
+#
+#   jobs:
+#     lint:
+#       uses: orangitfi/platform-tooling/.github/workflows/python-lint.yml@<sha>
+#       with:
+#         working-directory: .
+#         dockerfile-path: Dockerfile
+
+name: Python Lint
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Directory containing pyproject.toml"
+        required: false
+        default: "."
+        type: string
+      run-ruff-lint:
+        description: "Run ruff check (linting)"
+        required: false
+        default: true
+        type: boolean
+      run-ruff-format:
+        description: "Run ruff format --check (formatting)"
+        required: false
+        default: true
+        type: boolean
+      dockerfile-path:
+        description: "Path to the Dockerfile relative to the repository root"
+        required: false
+        default: "Dockerfile"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  ruff:
+    name: Ruff Lint and Format
+    if: ${{ inputs.run-ruff-lint || inputs.run-ruff-format }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: orangitfi/platform-tooling/.github/actions/setup-uv@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+
+      - name: Run ruff check
+        if: ${{ inputs.run-ruff-lint }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: uvx ruff check .
+
+      - name: Run ruff format check
+        if: ${{ inputs.run-ruff-format }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: uvx ruff format --check .
+
+  docker-lint:
+    name: Docker Lint (hadolint)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for Dockerfile
+        id: check
+        shell: bash
+        run: |
+          if [ -f "${{ inputs.dockerfile-path }}" ]; then
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+            echo "No Dockerfile found at '${{ inputs.dockerfile-path }}', skipping docker lint."
+          fi
+
+      - name: Lint Dockerfile
+        if: steps.check.outputs.exists == 'true'
+        uses: orangitfi/platform-tooling/.github/actions/docker-lint@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+        with:
+          dockerfile: ${{ inputs.dockerfile-path }}
+          working-directory: ${{ inputs.working-directory }}

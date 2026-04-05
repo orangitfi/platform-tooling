@@ -1,0 +1,130 @@
+name: "OWASP ZAP Scan"
+description: >
+  Run an OWASP ZAP dynamic application security scan against a live URL.
+  Pulls ZAP directly from the official Docker image (pinned digest) — no
+  marketplace actions used. If target-url is empty the scan is skipped cleanly.
+
+inputs:
+  target-url:
+    description: "URL of the running application to scan. Leave empty to skip."
+    required: false
+    default: ""
+  scan-type:
+    description: >
+      Scan type:
+        baseline — passive scan only, ~2 min, low noise. Good for nightly PRs.
+        full     — active scan (sends attack traffic), 10-30 min. Good for nightly.
+        api      — OpenAPI/Swagger-aware passive scan. Requires openapi-spec.
+    required: false
+    default: "baseline"
+  openapi-spec:
+    description: >
+      URL or repo-relative file path of the OpenAPI spec.
+      Only used when scan-type is api.
+      Defaults to {target-url}/openapi.json when omitted.
+    required: false
+    default: ""
+  fail-on-findings:
+    description: "Fail the step if ZAP reports any alerts (true/false)"
+    required: false
+    default: "true"
+  artifact-name:
+    description: "Name of the uploaded HTML + JSON report artifact"
+    required: false
+    default: "zap-report"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Skip — no target URL provided
+      if: ${{ inputs.target-url == '' }}
+      shell: bash
+      run: |
+        echo "::notice::No target-url provided — OWASP ZAP scan skipped."
+
+    - name: Create report directory
+      if: ${{ inputs.target-url != '' }}
+      shell: bash
+      run: |
+        mkdir -p zap-reports
+        chmod 777 zap-reports
+
+    - name: Pull ZAP Docker image
+      if: ${{ inputs.target-url != '' }}
+      shell: bash
+      run: |
+        # Pinned to zaproxy/zaproxy stable (2025-01)
+        # To update: docker pull ghcr.io/zaproxy/zaproxy:stable && docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/zaproxy/zaproxy:stable
+        docker pull "ghcr.io/zaproxy/zaproxy@sha256:c4da4c234258d444d9988fce9d034b00323724818daa4c91ca46f09aa04b46db"
+
+    - name: Run ZAP scan
+      if: ${{ inputs.target-url != '' }}
+      shell: bash
+      run: |
+        TARGET_URL="${{ inputs.target-url }}"
+        SCAN_TYPE="${{ inputs.scan-type }}"
+        OPENAPI_SPEC="${{ inputs.openapi-spec }}"
+        ZAP_IMAGE="ghcr.io/zaproxy/zaproxy@sha256:c4da4c234258d444d9988fce9d034b00323724818daa4c91ca46f09aa04b46db"
+
+        case "${SCAN_TYPE}" in
+          baseline)
+            SCAN_SCRIPT="zap-baseline.py"
+            ZAP_ARGS="-t ${TARGET_URL} -r zap-report.html -J zap-report.json"
+            ;;
+          full)
+            SCAN_SCRIPT="zap-full-scan.py"
+            ZAP_ARGS="-t ${TARGET_URL} -r zap-report.html -J zap-report.json"
+            ;;
+          api)
+            SCAN_SCRIPT="zap-api-scan.py"
+            SPEC="${OPENAPI_SPEC:-${TARGET_URL}/openapi.json}"
+            ZAP_ARGS="-t ${SPEC} -f openapi -O ${TARGET_URL} -r zap-report.html -J zap-report.json"
+            ;;
+          *)
+            echo "::error::Unknown scan-type '${SCAN_TYPE}'. Valid values: baseline, full, api."
+            exit 1
+            ;;
+        esac
+
+        echo "## OWASP ZAP ${SCAN_TYPE} Scan" >> "${GITHUB_STEP_SUMMARY}"
+        echo ""                                >> "${GITHUB_STEP_SUMMARY}"
+        echo "- **Target**: ${TARGET_URL}"     >> "${GITHUB_STEP_SUMMARY}"
+        echo "- **Scan type**: ${SCAN_TYPE}"   >> "${GITHUB_STEP_SUMMARY}"
+
+        set +e
+        docker run --rm \
+          -v "$(pwd)/zap-reports:/zap/wrk:rw" \
+          "${ZAP_IMAGE}" \
+          ${SCAN_SCRIPT} ${ZAP_ARGS}
+        ZAP_EXIT_CODE=$?
+        set -e
+
+        echo "ZAP_EXIT_CODE=${ZAP_EXIT_CODE}" >> "${GITHUB_ENV}"
+
+        if [ "${ZAP_EXIT_CODE}" -eq 0 ]; then
+          echo "- **Result**: ✅ No alerts found" >> "${GITHUB_STEP_SUMMARY}"
+        else
+          echo "- **Result**: ⚠️ Alerts found — see the \`${{ inputs.artifact-name }}\` artifact" >> "${GITHUB_STEP_SUMMARY}"
+        fi
+
+    - name: Upload ZAP report
+      if: ${{ always() && inputs.target-url != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: zap-reports/
+        retention-days: 30
+
+    - name: Evaluate findings
+      if: ${{ inputs.target-url != '' }}
+      shell: bash
+      run: |
+        if [ "${ZAP_EXIT_CODE}" -ne 0 ]; then
+          MSG="OWASP ZAP found security alerts (exit code ${ZAP_EXIT_CODE}). See the '${{ inputs.artifact-name }}' artifact for the full report."
+          if [ "${{ inputs.fail-on-findings }}" = "true" ]; then
+            echo "::error::${MSG}"
+            exit 1
+          else
+            echo "::warning::${MSG}"
+          fi
+        fi

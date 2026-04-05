@@ -1,0 +1,149 @@
+# Python CI (uv)
+#
+# Reusable workflow that wires together the full Python / uv CI pipeline:
+#
+#   security    — gitleaks + pip-audit + guarddog (gates everything below)
+#   lint        — ruff check + ruff format + hadolint   ┐
+#   test        — uv sync + pytest                      ├─ parallel after security
+#   docker-build — Dockerfile validation (opt-in)       ┘
+#   vulnerability-scan — Syft + Grype (after all above pass or are skipped)
+#
+# The consuming repo controls WHEN this runs. This workflow controls HOW.
+#
+# Usage in a consuming repository:
+#
+#   on: [push, pull_request, workflow_dispatch]
+#
+#   jobs:
+#     ci:
+#       uses: orangitfi/platform-tooling/.github/workflows/python-ci.yml@<sha>
+#       with:
+#         image-name: my-api
+#
+# See python-ci.md for full documentation and all parameter options.
+#
+# ─── SHA pinning ─────────────────────────────────────────────────────────────
+# The `uses:` lines below reference platform-tooling workflows at a specific
+# SHA. After committing this file, run the SHA bump process documented in the
+# root README to replace b671c309c4bd5eea9927e0f93173a25819b20461 with the new commit SHA.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: CI
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Directory containing pyproject.toml and uv.lock"
+        required: false
+        default: "."
+        type: string
+      test-command:
+        description: "Command to run tests via uv run (e.g. pytest, pytest tests/ -v)"
+        required: false
+        default: "pytest"
+        type: string
+      uv-sync-args:
+        description: "Extra arguments passed to uv sync (e.g. --extra test)"
+        required: false
+        default: ""
+        type: string
+      run-ruff-lint:
+        description: "Run ruff check (linting)"
+        required: false
+        default: true
+        type: boolean
+      run-ruff-format:
+        description: "Run ruff format --check (formatting)"
+        required: false
+        default: true
+        type: boolean
+      dockerfile-path:
+        description: "Path to the Dockerfile relative to the repo root (used by lint, docker-build, and vulnerability scan)"
+        required: false
+        default: "Dockerfile"
+        type: string
+      run-docker-build:
+        description: "Validate that the Dockerfile builds successfully as an early quality gate (opt-in)"
+        required: false
+        default: false
+        type: boolean
+      image-name:
+        description: "Docker image name — required when run-docker-build is true; also used by vulnerability scan"
+        required: false
+        default: ""
+        type: string
+      fail-on-severity:
+        description: "Minimum Grype severity for the vulnerability scan: critical, high, medium, low, negligible"
+        required: false
+        default: "high"
+        type: string
+      run-docker-scan:
+        description: "Build and scan the Docker image in the vulnerability scan (set false for repos without a Dockerfile)"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # 1. Security audit — runs first, gates everything else
+  # ───────────────────────────────────────────────────────────────────────────
+  security:
+    name: Security Scan
+    uses: orangitfi/platform-tooling/.github/workflows/python-security-scan.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    with:
+      working-directory: ${{ inputs.working-directory }}
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 2. Lint + Test + optional Docker build — parallel after security passes
+  # ───────────────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    needs: security
+    uses: orangitfi/platform-tooling/.github/workflows/python-lint.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    with:
+      working-directory: ${{ inputs.working-directory }}
+      run-ruff-lint:     ${{ inputs.run-ruff-lint }}
+      run-ruff-format:   ${{ inputs.run-ruff-format }}
+      dockerfile-path:   ${{ inputs.dockerfile-path }}
+
+  test:
+    name: Test
+    needs: security
+    uses: orangitfi/platform-tooling/.github/workflows/python-test.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    with:
+      working-directory: ${{ inputs.working-directory }}
+      test-command:      ${{ inputs.test-command }}
+      uv-sync-args:      ${{ inputs.uv-sync-args }}
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 3. Optional Docker build — validates the Dockerfile compiles cleanly
+  #    Skipped when disabled; vulnerability-scan still runs after the skip
+  # ───────────────────────────────────────────────────────────────────────────
+  docker-build:
+    name: Docker Build
+    if: ${{ inputs.run-docker-build }}
+    needs: security
+    uses: orangitfi/platform-tooling/.github/workflows/python-build-and-publish-docker.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    with:
+      working-directory: ${{ inputs.working-directory }}
+      dockerfile-path:   ${{ inputs.dockerfile-path }}
+      image-name:        ${{ inputs.image-name }}
+      publish:           false
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 4. Vulnerability scan — runs after all quality gates pass or are skipped
+  # ───────────────────────────────────────────────────────────────────────────
+  vulnerability-scan:
+    name: Vulnerability Scan
+    needs: [lint, test, docker-build]
+    uses: orangitfi/platform-tooling/.github/workflows/python-vulnerability-scan.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    with:
+      working-directory: ${{ inputs.working-directory }}
+      fail-on-severity:  ${{ inputs.fail-on-severity }}
+      run-docker-scan:   ${{ inputs.run-docker-scan }}
+      dockerfile-path:   ${{ inputs.dockerfile-path }}
+      image-name:        ${{ inputs.image-name }}

@@ -1,0 +1,83 @@
+# Node Lint
+#
+# Reusable workflow that runs two lint jobs in parallel:
+#
+#   1. npm lint   — runs the npm lint script (ESLint, Prettier, etc.)
+#   2. docker lint — runs hadolint against the Dockerfile
+#                    skipped cleanly if no Dockerfile is found
+#
+# Usage in a consuming repository:
+#
+#   jobs:
+#     lint:
+#       uses: orangitfi/platform-tooling/.github/workflows/node-lint.yml@<sha>
+#       with:
+#         working-directory: ./src
+#         dockerfile-path: Dockerfile
+
+name: Node Lint
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Directory containing package.json"
+        required: false
+        default: "."
+        type: string
+      lint-command:
+        description: "npm script to run for linting (e.g. lint, lint:check, lint:ci)"
+        required: false
+        default: "lint"
+        type: string
+      dockerfile-path:
+        description: "Path to the Dockerfile relative to the repository root"
+        required: false
+        default: "Dockerfile"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  npm-lint:
+    name: npm Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: npm ci
+
+      - name: Run lint
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: npm run ${{ inputs.lint-command }}
+
+  docker-lint:
+    name: Docker Lint (hadolint)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for Dockerfile
+        id: check
+        shell: bash
+        run: |
+          if [ -f "${{ inputs.dockerfile-path }}" ]; then
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+            echo "No Dockerfile found at '${{ inputs.dockerfile-path }}', skipping docker lint."
+          fi
+
+      - name: Lint Dockerfile
+        if: steps.check.outputs.exists == 'true'
+        uses: orangitfi/platform-tooling/.github/actions/docker-lint@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+        with:
+          dockerfile: ${{ inputs.dockerfile-path }}
+          working-directory: ${{ inputs.working-directory }}

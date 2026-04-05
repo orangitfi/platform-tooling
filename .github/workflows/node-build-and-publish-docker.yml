@@ -1,0 +1,190 @@
+# Node Build and Publish Docker
+#
+# Reusable workflow that builds a Docker image and optionally pushes it to
+# GCP Artifact Registry. Follows the model of .github/actions/docker-build-push.
+#
+# Secrets are read from 1Password using OP_SERVICE_ACCOUNT_TOKEN.
+# Every value fetched from 1Password is masked before use.
+#
+# When publish is false:
+#   - No 1Password read, no registry login or logout occurs
+#   - Image is built locally and tagged, then removed on cleanup
+#
+# When publish is true:
+#   - Reads the GCP service account key from 1Password and masks it
+#   - Logs in to Artifact Registry
+#   - Builds the image
+#   - Pushes both a SHA-pinned tag and :latest
+#   - Logs out after push
+#
+# Usage — build only (e.g. on pull_request):
+#
+#   jobs:
+#     docker-build:
+#       uses: your-org/platform-tooling/.github/workflows/node-build-and-publish-docker.yml@v1
+#       with:
+#         image-name: my-app
+#
+# Usage — build and publish (e.g. on push to main):
+#
+#   jobs:
+#     docker-publish:
+#       uses: your-org/platform-tooling/.github/workflows/node-build-and-publish-docker.yml@v1
+#       with:
+#         image-name:          my-app
+#         project-id:          my-gcp-project
+#         registry-repo:       my-repo
+#         gcp-sa-key-op-ref:   op://my-vault/gcp-credentials/service-account-key
+#         publish:             true
+#       secrets:
+#         op-service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
+name: Node Build and Publish Docker
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Docker build context directory"
+        required: false
+        default: "."
+        type: string
+      dockerfile-path:
+        description: "Path to the Dockerfile relative to working-directory"
+        required: false
+        default: "Dockerfile"
+        type: string
+      image-name:
+        description: "Image name without registry prefix or tag (e.g. my-app)"
+        required: true
+        type: string
+      region:
+        description: "GCP region of the Artifact Registry"
+        required: false
+        default: "europe-north1"
+        type: string
+      project-id:
+        description: "GCP project ID — required when publish is true"
+        required: false
+        default: ""
+        type: string
+      registry-repo:
+        description: "Artifact Registry repository name — required when publish is true"
+        required: false
+        default: ""
+        type: string
+      gcp-sa-key-op-ref:
+        description: "1Password reference to the GCP service account key JSON (e.g. op://vault/item/field) — required when publish is true"
+        required: false
+        default: ""
+        type: string
+      publish:
+        description: "Push the image to Artifact Registry after a successful build"
+        required: false
+        default: false
+        type: boolean
+    secrets:
+      op-service-account-token:
+        description: "1Password service account token — required when publish is true"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-publish:
+    name: ${{ inputs.publish && 'Build and Publish Docker' || 'Build Docker' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate publish inputs
+        if: ${{ inputs.publish }}
+        shell: bash
+        run: |
+          if [ -z "${{ inputs.project-id }}" ]; then
+            echo "::error::project-id is required when publish is true"
+            exit 1
+          fi
+          if [ -z "${{ inputs.registry-repo }}" ]; then
+            echo "::error::registry-repo is required when publish is true"
+            exit 1
+          fi
+          if [ -z "${{ inputs.gcp-sa-key-op-ref }}" ]; then
+            echo "::error::gcp-sa-key-op-ref is required when publish is true"
+            exit 1
+          fi
+
+      - name: Set image tags
+        shell: bash
+        run: |
+          if [ "${{ inputs.publish }}" = "true" ]; then
+            REGISTRY="${{ inputs.region }}-docker.pkg.dev/${{ inputs.project-id }}/${{ inputs.registry-repo }}"
+            IMAGE_BASE="${REGISTRY}/${{ inputs.image-name }}"
+          else
+            IMAGE_BASE="${{ inputs.image-name }}"
+          fi
+
+          echo "IMAGE_BASE=${IMAGE_BASE}"                                    >> "${GITHUB_ENV}"
+          echo "IMAGE_TEST=${IMAGE_BASE}:git-${{ github.sha }}-build"        >> "${GITHUB_ENV}"
+          echo "IMAGE_SHA=${IMAGE_BASE}:git-${{ github.sha }}"               >> "${GITHUB_ENV}"
+          echo "IMAGE_LATEST=${IMAGE_BASE}:latest"                           >> "${GITHUB_ENV}"
+
+      - name: Install 1Password CLI
+        if: ${{ inputs.publish }}
+        uses: 1password/install-cli-action@9a0c9dd934086b7ab1d90115d455bda1c53c2bdb  # v2
+
+      - name: Read GCP credentials from 1Password
+        if: ${{ inputs.publish }}
+        shell: bash
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.op-service-account-token }}
+        run: |
+          GCP_SA_KEY="$(op read '${{ inputs.gcp-sa-key-op-ref }}')"
+          echo "::add-mask::${GCP_SA_KEY}"
+          echo "GCP_SA_KEY=${GCP_SA_KEY}" >> "${GITHUB_ENV}"
+
+      - name: Log in to Artifact Registry
+        if: ${{ inputs.publish }}
+        shell: bash
+        run: |
+          echo "${GCP_SA_KEY}" | docker login \
+            -u _json_key \
+            --password-stdin \
+            "https://${{ inputs.region }}-docker.pkg.dev"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build Docker image
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          docker build \
+            -f "${{ inputs.dockerfile-path }}" \
+            -t "${IMAGE_TEST}" \
+            .
+
+      - name: Tag and push
+        if: ${{ inputs.publish }}
+        shell: bash
+        run: |
+          docker tag "${IMAGE_TEST}" "${IMAGE_SHA}"
+          docker tag "${IMAGE_TEST}" "${IMAGE_LATEST}"
+          docker push "${IMAGE_SHA}"
+          docker push "${IMAGE_LATEST}"
+
+      - name: Log out from Artifact Registry
+        if: ${{ inputs.publish }}
+        shell: bash
+        run: |
+          docker logout "https://${{ inputs.region }}-docker.pkg.dev"
+
+      - name: Clean up local images
+        if: always()
+        shell: bash
+        run: |
+          docker rmi "${IMAGE_TEST}"   || true
+          docker rmi "${IMAGE_SHA}"    || true
+          docker rmi "${IMAGE_LATEST}" || true
