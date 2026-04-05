@@ -54,7 +54,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install uv
-        uses: orangitfi/platform-tooling/.github/actions/setup-uv@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+        uses: orangitfi/platform-tooling/.github/actions/setup-uv@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
 
       - name: Install dependencies
         shell: bash

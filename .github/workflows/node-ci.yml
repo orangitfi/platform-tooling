@@ -27,7 +27,7 @@
 # ─── SHA pinning ─────────────────────────────────────────────────────────────
 # The `uses:` lines below reference platform-tooling workflows at a specific
 # SHA. After committing this file, run the SHA bump process documented in the
-# root README to update b671c309c4bd5eea9927e0f93173a25819b20461 to the commit that introduced this file.
+# root README to update a4ca46b0de8eda2f61573cfbd4164e538a7775a1 to the commit that introduced this file.
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: CI
@@ -120,7 +120,7 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
   security:
     name: Security Scan
-    uses: orangitfi/platform-tooling/.github/workflows/node-security-scan.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    uses: orangitfi/platform-tooling/.github/workflows/node-security-scan.yml@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
     with:
       working-directory: ${{ inputs.working-directory }}
       audit-level:       ${{ inputs.audit-level }}
@@ -131,7 +131,7 @@ jobs:
   lint:
     name: Lint
     needs: security
-    uses: orangitfi/platform-tooling/.github/workflows/node-lint.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    uses: orangitfi/platform-tooling/.github/workflows/node-lint.yml@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
     with:
       working-directory: ${{ inputs.working-directory }}
       lint-command:      ${{ inputs.lint-command }}
@@ -140,7 +140,7 @@ jobs:
   build:
     name: Build
     needs: security
-    uses: orangitfi/platform-tooling/.github/workflows/node-build.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    uses: orangitfi/platform-tooling/.github/workflows/node-build.yml@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
     with:
       working-directory: ${{ inputs.working-directory }}
       build-command:     ${{ inputs.build-command }}
@@ -148,7 +148,7 @@ jobs:
   test:
     name: Test
     needs: security
-    uses: orangitfi/platform-tooling/.github/workflows/node-test.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    uses: orangitfi/platform-tooling/.github/workflows/node-test.yml@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
     with:
       working-directory: ${{ inputs.working-directory }}
       run-unit-tests:    true
@@ -163,7 +163,7 @@ jobs:
     name: Functional E2E
     if: ${{ inputs.run-functional-e2e }}
     needs: security
-    uses: orangitfi/platform-tooling/.github/workflows/node-test.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    uses: orangitfi/platform-tooling/.github/workflows/node-test.yml@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
     with:
       working-directory:  ${{ inputs.working-directory }}
       run-unit-tests:     false
@@ -174,7 +174,7 @@ jobs:
     name: Visual Regression Test
     if: ${{ inputs.run-visual-test }}
     needs: security
-    uses: orangitfi/platform-tooling/.github/workflows/node-test.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    uses: orangitfi/platform-tooling/.github/workflows/node-test.yml@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
     with:
       working-directory:  ${{ inputs.working-directory }}
       run-unit-tests:     false
@@ -187,7 +187,7 @@ jobs:
   vulnerability-scan:
     name: Vulnerability Scan
     needs: [lint, build, test, functional-e2e, visual-test]
-    uses: orangitfi/platform-tooling/.github/workflows/node-vulnerability-scan.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    uses: orangitfi/platform-tooling/.github/workflows/node-vulnerability-scan.yml@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
     with:
       working-directory: ${{ inputs.working-directory }}
       fail-on-severity:  ${{ inputs.fail-on-severity }}

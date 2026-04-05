@@ -32,7 +32,7 @@
 # See python-daily.md for full documentation and all parameter options.
 #
 # ─── SHA pinning ─────────────────────────────────────────────────────────────
-# After committing this file, replace b671c309c4bd5eea9927e0f93173a25819b20461 with the new commit SHA.
+# After committing this file, replace a4ca46b0de8eda2f61573cfbd4164e538a7775a1 with the new commit SHA.
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: Daily Security
@@ -122,7 +122,7 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
   ci:
     name: CI
-    uses: orangitfi/platform-tooling/.github/workflows/python-ci.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    uses: orangitfi/platform-tooling/.github/workflows/python-ci.yml@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
     with:
       working-directory: ${{ inputs.working-directory }}
       test-command:      ${{ inputs.test-command }}
@@ -140,7 +140,7 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
   dast:
     name: DAST (OWASP ZAP)
-    uses: orangitfi/platform-tooling/.github/workflows/dast-scan.yml@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+    uses: orangitfi/platform-tooling/.github/workflows/dast-scan.yml@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
     with:
       target-url:       ${{ inputs.target-url }}
       scan-type:        ${{ inputs.scan-type }}
