@@ -18,7 +18,7 @@ This action simplifies the setup of security scanning tools by providing a singl
 ```yaml
 steps:
   - name: Checkout code
-    uses: actions/checkout@v4
+    uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
   - name: Setup Security Tools
     uses: orangitfi/platform-tooling/.github/actions/scheduled_test_setup@<current-sha>
@@ -36,7 +36,7 @@ jobs:
   security-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Security Tools
         uses: orangitfi/platform-tooling/.github/actions/scheduled_test_setup@<current-sha>
@@ -54,7 +54,7 @@ This action is designed to be used before other security scanning actions that r
 
 ```yaml
 steps:
-  - uses: actions/checkout@v4
+  - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
   - name: Setup Security Tools
     uses: orangitfi/platform-tooling/.github/actions/scheduled_test_setup@<current-sha>
@@ -107,7 +107,7 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Security Tools
         uses: orangitfi/platform-tooling/.github/actions/scheduled_test_setup@<current-sha>
@@ -119,7 +119,7 @@ jobs:
         run: grype sbom:sbom.json --only-fixed --fail-on high -o table
 
       - name: Upload SBOM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: sbom
           path: sbom.json
@@ -136,7 +136,7 @@ jobs:
   scan-image:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Build container
         run: docker build -t myapp:latest .

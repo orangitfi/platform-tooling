@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Scan Docker image
         uses: orangitfi/platform-tooling/.github/actions/docker-scan@<current-sha>
@@ -79,7 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Scan Docker image
         uses: orangitfi/platform-tooling/.github/actions/docker-scan@<current-sha>
@@ -105,7 +105,7 @@ jobs:
   scan-frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: orangitfi/platform-tooling/.github/actions/docker-scan@<current-sha>
         with:
           working-directory: "./frontend"
@@ -116,7 +116,7 @@ jobs:
   scan-backend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: orangitfi/platform-tooling/.github/actions/docker-scan@<current-sha>
         with:
           working-directory: "./backend"
