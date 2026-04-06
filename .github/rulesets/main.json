@@ -9,11 +9,7 @@
     }
   },
   "bypass_actors": [
-    { "actor_id": 55456573,  "actor_type": "User", "bypass_mode": "always" },
-    { "actor_id": 198748253, "actor_type": "User", "bypass_mode": "always" },
-    { "actor_id": 101169333, "actor_type": "User", "bypass_mode": "always" },
-    { "actor_id": 18302380,  "actor_type": "User", "bypass_mode": "always" },
-    { "actor_id": 235326892, "actor_type": "User", "bypass_mode": "always" }
+    { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" }
   ],
   "rules": [
     {
