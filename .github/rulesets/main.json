@@ -8,6 +8,13 @@
       "exclude": []
     }
   },
+  "bypass_actors": [
+    { "actor_id": 55456573,  "actor_type": "User", "bypass_mode": "always" },
+    { "actor_id": 198748253, "actor_type": "User", "bypass_mode": "always" },
+    { "actor_id": 101169333, "actor_type": "User", "bypass_mode": "always" },
+    { "actor_id": 18302380,  "actor_type": "User", "bypass_mode": "always" },
+    { "actor_id": 235326892, "actor_type": "User", "bypass_mode": "always" }
+  ],
   "rules": [
     {
       "type": "deletion"
@@ -23,7 +30,7 @@
       "parameters": {
         "required_approving_review_count": 1,
         "dismiss_stale_reviews_on_push": true,
-        "require_code_owner_review": false,
+        "require_code_owner_review": true,
         "require_last_push_approval": true,
         "allowed_merge_methods": ["squash"]
       }
@@ -37,6 +44,13 @@
             "context": "CI / ci"
           }
         ]
+      }
+    },
+    {
+      "type": "restrict_pushes",
+      "parameters": {
+        "restrict_creates": true,
+        "push_allowances": []
       }
     }
   ]
