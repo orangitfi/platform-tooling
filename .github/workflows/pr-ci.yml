@@ -1,0 +1,98 @@
+# PR CI
+#
+# Self-hosted CI for the platform-tooling repository itself.
+# Unlike every other workflow here (which use workflow_call and run in
+# *consuming* repos), this workflow has real push/PR triggers so that
+# changes to actions and reusable workflows are validated before merge.
+#
+# Jobs (parallel):
+#   1. actionlint  — static analysis of all GitHub Actions workflow files
+#   2. gitleaks    — scans git history for committed secrets
+
+name: PR CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: Lint Workflows (actionlint)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install actionlint
+        env:
+          # ---------------------------------------------------------------
+          # Pinned to v1.7.12. When upgrading, update BOTH the version and
+          # the checksum below. Checksums sourced from the official release:
+          # https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_checksums.txt
+          # ---------------------------------------------------------------
+          ACTIONLINT_VERSION: "1.7.12"
+          CHECKSUM_LINUX_AMD64: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        run: |
+          set -euo pipefail
+
+          ARCHIVE="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          URL="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${ARCHIVE}"
+          TMP="$(mktemp -d)"
+          trap 'rm -rf "${TMP}"' EXIT
+
+          echo "Downloading actionlint v${ACTIONLINT_VERSION}..."
+          curl -sSfL -o "${TMP}/${ARCHIVE}" "${URL}"
+
+          echo "Verifying SHA-256 checksum..."
+          echo "${CHECKSUM_LINUX_AMD64}  ${TMP}/${ARCHIVE}" | sha256sum --check --strict -
+          echo "Checksum verified."
+
+          tar -xzf "${TMP}/${ARCHIVE}" -C "${TMP}" actionlint
+          install -m 0755 "${TMP}/actionlint" /usr/local/bin/actionlint
+
+          echo "Installed: $(actionlint --version)"
+
+      - name: Run actionlint
+        run: |
+          set -euo pipefail
+
+          {
+            echo "## Actionlint Workflow Lint"
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          EXIT_CODE=0
+          OUTPUT="$(actionlint 2>&1)" || EXIT_CODE=$?
+
+          if [ "${EXIT_CODE}" -eq 0 ]; then
+            echo "No errors found." >> "${GITHUB_STEP_SUMMARY}"
+          else
+            {
+              echo "<details><summary>Errors</summary>"
+              echo ""
+              echo '```'
+              printf '%s\n' "${OUTPUT}"
+              echo '```'
+              echo ""
+              echo "</details>"
+            } >> "${GITHUB_STEP_SUMMARY}"
+            echo "::error::actionlint found errors in workflow files. See the job summary for details."
+            exit "${EXIT_CODE}"
+          fi
+
+  gitleaks:
+    name: Secret Scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks scan
+        uses: orangitfi/platform-tooling/.github/actions/gitleaks-scan@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
