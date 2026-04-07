@@ -89,10 +89,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Run OWASP ZAP scan
-        uses: orangitfi/platform-tooling/.github/actions/owasp-zap-scan@b671c309c4bd5eea9927e0f93173a25819b20461 # pt-sha
+        uses: orangitfi/platform-tooling/.github/actions/owasp-zap-scan@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
         with:
           target-url:       ${{ inputs.target-url }}
           scan-type:        ${{ inputs.scan-type }}

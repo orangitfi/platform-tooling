@@ -8,6 +8,9 @@
       "exclude": []
     }
   },
+  "bypass_actors": [
+    { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" }
+  ],
   "rules": [
     {
       "type": "deletion"
@@ -23,7 +26,7 @@
       "parameters": {
         "required_approving_review_count": 1,
         "dismiss_stale_reviews_on_push": true,
-        "require_code_owner_review": false,
+        "require_code_owner_review": true,
         "require_last_push_approval": true,
         "allowed_merge_methods": ["squash"]
       }
@@ -37,6 +40,13 @@
             "context": "CI / ci"
           }
         ]
+      }
+    },
+    {
+      "type": "restrict_pushes",
+      "parameters": {
+        "restrict_creates": true,
+        "push_allowances": []
       }
     }
   ]

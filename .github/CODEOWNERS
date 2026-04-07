@@ -1,15 +1,11 @@
 # CODEOWNERS
 # Each line is a file pattern followed by one or more owners.
-# Owners are notified and added as reviewers when a matching file is changed in a PR.
+# Owners are notified and required reviewers when a matching file is changed in a PR.
+# The LAST matching pattern takes precedence.
 # Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
-#
-# TODO: Uncomment and replace the entries below with real GitHub teams or usernames.
 
 # Default owners for everything in the repo
-# * @org/team-name
+* @MikaKattainen @orangit-karo-laine @orangit-sami-bister @Ossmoskosmos @orangit-timo-aho
 
-# Documentation
-# *.md              @org/docs-team
-
-# GitHub configuration
-# .github/          @org/platform-team
+# GitHub configuration — same owners, explicit
+.github/ @MikaKattainen @orangit-karo-laine @orangit-sami-bister @Ossmoskosmos @orangit-timo-aho
