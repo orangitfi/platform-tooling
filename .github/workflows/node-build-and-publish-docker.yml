@@ -126,10 +126,12 @@ jobs:
             IMAGE_BASE="${{ inputs.image-name }}"
           fi
 
-          echo "IMAGE_BASE=${IMAGE_BASE}"                                    >> "${GITHUB_ENV}"
-          echo "IMAGE_TEST=${IMAGE_BASE}:git-${{ github.sha }}-build"        >> "${GITHUB_ENV}"
-          echo "IMAGE_SHA=${IMAGE_BASE}:git-${{ github.sha }}"               >> "${GITHUB_ENV}"
-          echo "IMAGE_LATEST=${IMAGE_BASE}:latest"                           >> "${GITHUB_ENV}"
+          {
+            echo "IMAGE_BASE=${IMAGE_BASE}"
+            echo "IMAGE_TEST=${IMAGE_BASE}:git-${{ github.sha }}-build"
+            echo "IMAGE_SHA=${IMAGE_BASE}:git-${{ github.sha }}"
+            echo "IMAGE_LATEST=${IMAGE_BASE}:latest"
+          } >> "${GITHUB_ENV}"
 
       - name: Install 1Password CLI
         if: ${{ inputs.publish }}
