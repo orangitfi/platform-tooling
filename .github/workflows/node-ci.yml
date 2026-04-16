@@ -110,6 +110,11 @@ on:
         required: false
         default: ""
         type: string
+      node-version:
+        description: "Node.js version to use (e.g. 20, 22)"
+        required: false
+        default: "20"
+        type: string
 
 permissions:
   contents: read
@@ -136,6 +141,7 @@ jobs:
       working-directory: ${{ inputs.working-directory }}
       lint-command:      ${{ inputs.lint-command }}
       dockerfile-path:   ${{ inputs.dockerfile-path }}
+      node-version:      ${{ inputs.node-version }}
 
   build:
     name: Build
@@ -144,6 +150,7 @@ jobs:
     with:
       working-directory: ${{ inputs.working-directory }}
       build-command:     ${{ inputs.build-command }}
+      node-version:      ${{ inputs.node-version }}
 
   test:
     name: Test
@@ -155,6 +162,7 @@ jobs:
       test-command:      ${{ inputs.test-command }}
       run-playwright:    ${{ inputs.run-playwright }}
       playwright-command: ${{ inputs.playwright-command }}
+      node-version:      ${{ inputs.node-version }}
 
   # ───────────────────────────────────────────────────────────────────────────
   # 3. Optional jobs — skipped when disabled; vulnerability-scan still runs
@@ -169,6 +177,7 @@ jobs:
       run-unit-tests:     false
       run-playwright:     true
       playwright-command: ${{ inputs.functional-e2e-command }}
+      node-version:       ${{ inputs.node-version }}
 
   visual-test:
     name: Visual Regression Test
@@ -180,6 +189,7 @@ jobs:
       run-unit-tests:     false
       run-playwright:     true
       playwright-command: ${{ inputs.visual-test-command }}
+      node-version:       ${{ inputs.node-version }}
 
   # ───────────────────────────────────────────────────────────────────────────
   # 4. Vulnerability scan — runs after all quality gates pass or are skipped
