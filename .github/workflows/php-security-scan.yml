@@ -1,0 +1,83 @@
+# PHP Security Scan
+#
+# Reusable workflow that runs three security scans in parallel against
+# PHP / Symfony repositories:
+#
+#   1. gitleaks          — detects secrets committed to the repository
+#   2. composer-audit    — detects known CVEs in PHP dependencies (via composer.lock)
+#   3. guarddog-php      — detects supply-chain threats in Packagist packages
+#
+# All three jobs run in parallel; the workflow fails if any one of them fails.
+#
+# WARNING: The guarddog Packagist scan is experimental. See the
+# guarddog-php-scan action README for details before enabling fail-on-findings.
+#
+# Usage in a consuming repository:
+#
+#   jobs:
+#     security:
+#       uses: orangitfi/platform-tooling/.github/workflows/php-security-scan.yml@<sha>
+#       with:
+#         working-directory: .
+#
+# Consuming repo controls WHEN this runs. This workflow controls HOW.
+
+name: PHP Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Directory containing composer.json and composer.lock"
+        required: false
+        default: "."
+        type: string
+      fail-on-findings:
+        description: "Fail the workflow if any scan detects issues"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: Secret Scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks scan
+        uses: orangitfi/platform-tooling/.github/actions/gitleaks-scan@REPLACE_WITH_COMMIT_SHA # pt-sha
+        with:
+          fail-on-findings: ${{ inputs.fail-on-findings }}
+
+  composer-audit:
+    name: Vulnerability Scan (composer audit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run composer audit
+        uses: orangitfi/platform-tooling/.github/actions/composer-audit@REPLACE_WITH_COMMIT_SHA # pt-sha
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          fail-on-findings: ${{ inputs.fail-on-findings }}
+
+  guarddog-php:
+    name: Supply Chain Scan (guarddog)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run guarddog Packagist scan
+        uses: orangitfi/platform-tooling/.github/actions/guarddog-php-scan@REPLACE_WITH_COMMIT_SHA # pt-sha
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          fail-on-findings: ${{ inputs.fail-on-findings }}
