@@ -1,0 +1,81 @@
+name: "Guarddog Packagist Supply-Chain Scan"
+description: >
+  Install guarddog and verify PHP packages listed in composer.json for
+  supply-chain threats (typosquatting, code injection, exfiltration, etc.)
+  BEFORE any dependency is installed.
+
+  WARNING: guarddog Packagist support is experimental. Verify behaviour
+  against your own composer.json before enabling fail-on-findings in
+  production pipelines. See README for details.
+
+inputs:
+  working-directory:
+    description: "Directory containing composer.json"
+    required: false
+    default: "."
+  fail-on-findings:
+    description: "Fail the step if guarddog detects issues (default: true)"
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install guarddog
+      shell: bash
+      run: pipx install guarddog
+
+    - name: Run guarddog packagist verify
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+      run: |
+        set -euo pipefail
+
+        if [ ! -f "composer.json" ]; then
+          echo "::error::composer.json not found in $(pwd). guarddog packagist verify requires a composer.json."
+          exit 1
+        fi
+
+        {
+          echo "## Guarddog Packagist Supply-Chain Scan"
+          echo ""
+          echo "> ⚠️ **Experimental:** guarddog Packagist support has received less production testing than npm/PyPI. Verify results manually before treating failures as blocking."
+          echo ""
+          echo "| Setting | Value |"
+          echo "|---------|-------|"
+          echo "| Working directory | \`${{ inputs.working-directory }}\` |"
+          echo ""
+        } >> "${GITHUB_STEP_SUMMARY}"
+
+        EXIT_CODE=0
+        guarddog packagist verify composer.json 2>&1 | tee /tmp/guarddog-php-output.txt || EXIT_CODE=$?
+
+        if [ "${EXIT_CODE}" -eq 0 ]; then
+          echo "No supply-chain threats detected." >> "${GITHUB_STEP_SUMMARY}"
+        else
+          {
+            echo "**Supply-chain threats detected.**"
+            echo ""
+            echo "<details><summary>Guarddog output</summary>"
+            echo ""
+            echo '```'
+            cat /tmp/guarddog-php-output.txt
+            echo '```'
+            echo ""
+            echo "</details>"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [ "${FAIL_ON_FINDINGS}" = "true" ]; then
+            echo "::error::guarddog detected potential supply-chain threats in Packagist packages. See the job summary for details."
+            exit 1
+          else
+            echo "::warning::guarddog detected potential supply-chain threats (scan is non-blocking)."
+          fi
+        fi
+
+    - name: Cleanup
+      if: always()
+      shell: bash
+      run: rm -f /tmp/guarddog-php-output.txt
