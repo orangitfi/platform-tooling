@@ -95,4 +95,4 @@ jobs:
           fetch-depth: 0
 
       - name: Run gitleaks scan
-        uses: orangitfi/platform-tooling/.github/actions/gitleaks-scan@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
+        uses: orangitfi/platform-tooling/.github/actions/gitleaks-scan@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha

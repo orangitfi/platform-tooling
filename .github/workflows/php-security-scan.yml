@@ -61,7 +61,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run gitleaks scan
-        uses: orangitfi/platform-tooling/.github/actions/gitleaks-scan@REPLACE_WITH_COMMIT_SHA # pt-sha
+        uses: orangitfi/platform-tooling/.github/actions/gitleaks-scan@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha
         with:
           fail-on-findings: ${{ inputs.fail-on-findings }}
 
@@ -73,7 +73,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Run composer audit
-        uses: orangitfi/platform-tooling/.github/actions/composer-audit@REPLACE_WITH_COMMIT_SHA # pt-sha
+        uses: orangitfi/platform-tooling/.github/actions/composer-audit@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha
         with:
           working-directory: ${{ inputs.working-directory }}
           fail-on-findings: ${{ inputs.fail-on-findings }}
@@ -87,7 +87,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Run guarddog Packagist scan
-        uses: orangitfi/platform-tooling/.github/actions/guarddog-php-scan@REPLACE_WITH_COMMIT_SHA # pt-sha
+        uses: orangitfi/platform-tooling/.github/actions/guarddog-php-scan@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha
         with:
           working-directory: ${{ inputs.working-directory }}
           fail-on-findings: ${{ inputs.fail-on-findings }}

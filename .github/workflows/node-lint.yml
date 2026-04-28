@@ -88,7 +88,7 @@ jobs:
 
       - name: Lint Dockerfile
         if: steps.check.outputs.exists == 'true'
-        uses: orangitfi/platform-tooling/.github/actions/docker-lint@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
+        uses: orangitfi/platform-tooling/.github/actions/docker-lint@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha
         with:
           dockerfile: ${{ inputs.dockerfile-path }}
           working-directory: ${{ inputs.working-directory }}

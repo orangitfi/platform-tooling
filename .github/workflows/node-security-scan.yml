@@ -56,7 +56,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run gitleaks scan
-        uses: orangitfi/platform-tooling/.github/actions/gitleaks-scan@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
+        uses: orangitfi/platform-tooling/.github/actions/gitleaks-scan@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha
         with:
           fail-on-findings: ${{ inputs.fail-on-findings }}
 
@@ -68,7 +68,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Run npm audit
-        uses: orangitfi/platform-tooling/.github/actions/npm-audit@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
+        uses: orangitfi/platform-tooling/.github/actions/npm-audit@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha
         with:
           working-directory: ${{ inputs.working-directory }}
           audit-level: ${{ inputs.audit-level }}
@@ -82,7 +82,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Run guarddog npm scan
-        uses: orangitfi/platform-tooling/.github/actions/guarddog-npm-scan@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
+        uses: orangitfi/platform-tooling/.github/actions/guarddog-npm-scan@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha
         with:
           working-directory: ${{ inputs.working-directory }}
           fail-on-findings: ${{ inputs.fail-on-findings }}

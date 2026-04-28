@@ -25,7 +25,7 @@
 # ─── SHA pinning ─────────────────────────────────────────────────────────────
 # The `uses:` lines below reference platform-tooling workflows at a specific
 # SHA. After committing this file, run the SHA bump process documented in the
-# root README to replace a4ca46b0de8eda2f61573cfbd4164e538a7775a1 with the new commit SHA.
+# root README to replace f877740fc9a519be6b06492ffd69017337b8ca86 with the new commit SHA.
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: CI
@@ -93,7 +93,7 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
   security:
     name: Security Scan
-    uses: orangitfi/platform-tooling/.github/workflows/python-security-scan.yml@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
+    uses: orangitfi/platform-tooling/.github/workflows/python-security-scan.yml@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha
     with:
       working-directory: ${{ inputs.working-directory }}
 
@@ -103,7 +103,7 @@ jobs:
   lint:
     name: Lint
     needs: security
-    uses: orangitfi/platform-tooling/.github/workflows/python-lint.yml@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
+    uses: orangitfi/platform-tooling/.github/workflows/python-lint.yml@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha
     with:
       working-directory: ${{ inputs.working-directory }}
       run-ruff-lint:     ${{ inputs.run-ruff-lint }}
@@ -113,7 +113,7 @@ jobs:
   test:
     name: Test
     needs: security
-    uses: orangitfi/platform-tooling/.github/workflows/python-test.yml@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
+    uses: orangitfi/platform-tooling/.github/workflows/python-test.yml@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha
     with:
       working-directory: ${{ inputs.working-directory }}
       test-command:      ${{ inputs.test-command }}
@@ -127,7 +127,7 @@ jobs:
     name: Docker Build
     if: ${{ inputs.run-docker-build }}
     needs: security
-    uses: orangitfi/platform-tooling/.github/workflows/python-build-and-publish-docker.yml@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
+    uses: orangitfi/platform-tooling/.github/workflows/python-build-and-publish-docker.yml@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha
     with:
       working-directory: ${{ inputs.working-directory }}
       dockerfile-path:   ${{ inputs.dockerfile-path }}
@@ -140,7 +140,7 @@ jobs:
   vulnerability-scan:
     name: Vulnerability Scan
     needs: [lint, test, docker-build]
-    uses: orangitfi/platform-tooling/.github/workflows/python-vulnerability-scan.yml@a4ca46b0de8eda2f61573cfbd4164e538a7775a1 # pt-sha
+    uses: orangitfi/platform-tooling/.github/workflows/python-vulnerability-scan.yml@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha
     with:
       working-directory: ${{ inputs.working-directory }}
       fail-on-severity:  ${{ inputs.fail-on-severity }}
