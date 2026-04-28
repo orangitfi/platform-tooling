@@ -96,11 +96,22 @@ def render_mermaid_diagrams(md_content, tmp_dir):
         diagram_src = m.group(1)
         mmd_file = Path(tmp_dir) / f"mermaid-{idx}.mmd"
         png_file = Path(tmp_dir) / f"mermaid-{idx}.png"
+        puppeteer_cfg = Path(tmp_dir) / "puppeteer-config.json"
         mmd_file.write_text(diagram_src, encoding="utf-8")
+
+        # Write puppeteer config once (idempotent)
+        if not puppeteer_cfg.exists():
+            puppeteer_cfg.write_text('{"args": ["--no-sandbox"]}', encoding="utf-8")
 
         try:
             subprocess.run(
-                ["mmdc", "-i", str(mmd_file), "-o", str(png_file), "--backgroundColor", "white"],
+                [
+                    "mmdc",
+                    "-i", str(mmd_file),
+                    "-o", str(png_file),
+                    "--backgroundColor", "white",
+                    "--puppeteerConfigFile", str(puppeteer_cfg),
+                ],
                 check=True,
                 capture_output=True,
             )
