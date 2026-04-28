@@ -62,9 +62,9 @@ runs:
         fi
 
         # Build --ignore-severity flags (flag is repeatable, not comma-separated)
-        SEVERITY_FLAGS=""
+        SEVERITY_FLAGS=()
         for SEV in ${IGNORE_SEVERITY}; do
-          SEVERITY_FLAGS="${SEVERITY_FLAGS} --ignore-severity=${SEV}"
+          SEVERITY_FLAGS+=("--ignore-severity=${SEV}")
         done
 
         {
@@ -81,8 +81,7 @@ runs:
         } >> "${GITHUB_STEP_SUMMARY}"
 
         EXIT_CODE=0
-        # shellcheck disable=SC2086
-        composer audit --format=json --no-interaction ${SEVERITY_FLAGS} 1>"${REPORT}" 2>/dev/null || EXIT_CODE=$?
+        composer audit --format=json --no-interaction "${SEVERITY_FLAGS[@]}" 1>"${REPORT}" 2>/dev/null || EXIT_CODE=$?
 
         TOTAL=0
         if command -v jq >/dev/null 2>&1 && [ -f "${REPORT}" ]; then
@@ -98,8 +97,7 @@ runs:
           echo "vulnerabilities-found=${TOTAL}" >> "${GITHUB_OUTPUT}"
 
           # Re-run without --format=json for human-readable summary output
-          # shellcheck disable=SC2086
-          HUMAN_OUTPUT="$(composer audit --no-interaction ${SEVERITY_FLAGS} 2>&1 || true)"
+          HUMAN_OUTPUT="$(composer audit --no-interaction "${SEVERITY_FLAGS[@]}" 2>&1 || true)"
 
           {
             echo "**${TOTAL} vulnerability/vulnerabilities found.**"
