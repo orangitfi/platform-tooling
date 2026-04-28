@@ -44,6 +44,15 @@ runs:
       shell: bash
       run: uv pip install --system -r ${{ github.action_path }}/requirements.txt
 
+    - name: Install mermaid CLI (mmdc)
+      shell: bash
+      run: |
+        # Install mmdc globally via npm. Node.js is pre-installed on ubuntu-latest.
+        # Puppeteer (used by mmdc) needs a Chromium sandbox config on Linux.
+        npm install -g @mermaid-js/mermaid-cli --silent
+        # Verify installation
+        mmdc --version
+
     - name: Test Confluence connection
       shell: bash
       env:

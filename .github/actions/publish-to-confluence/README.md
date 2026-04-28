@@ -9,6 +9,8 @@ A GitHub Action that publishes Markdown documentation to Confluence Cloud, prese
 - 📝 **Markdown to Confluence** - Converts MD to HTML with tables and code blocks
 - 🏷️ **Smart titles** - Extracts from `#` headings or generates from filenames
 - 🚫 **Skips templates** - Ignores files with "template" in the name
+- 🧜 **Mermaid diagrams** - Fenced ` ```mermaid ``` ` blocks are rendered to PNG via `mmdc` and uploaded as Confluence attachments
+- 🖼️ **Local images** - Relative image references (`![alt](./images/foo.png)`) are uploaded as Confluence attachments and rendered inline
 
 ## Usage
 
@@ -129,6 +131,32 @@ docs/
     ├── index.md             → Folder page: "Guides"
     └── tutorial.md          → Child: "Tutorial"
 ```
+
+### Mermaid Diagrams
+
+Fenced ` ```mermaid ``` ` blocks are automatically rendered to PNG using `mmdc` (Mermaid CLI) and uploaded as Confluence page attachments. The diagram is then displayed inline using the Confluence `<ac:image>` storage format macro — no Confluence Mermaid app required.
+
+Example in your markdown:
+
+````markdown
+```mermaid
+graph TD
+    A[Push to main] --> B[Publish to Confluence]
+    B --> C[Done]
+```
+````
+
+If `mmdc` fails for a diagram (e.g. syntax error), the original fenced block is preserved as a code block and a warning is printed — the rest of the publish continues.
+
+### Local Images
+
+Relative image references in your markdown are uploaded as Confluence attachments:
+
+```markdown
+![Architecture diagram](./images/architecture.png)
+```
+
+Remote URLs (`https://...`) are left as-is and not uploaded.
 
 ### Title Extraction
 
