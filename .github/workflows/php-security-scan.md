@@ -9,7 +9,7 @@ Reusable workflow that runs three security scans **in parallel** against PHP / S
 | Job | Tool | What it checks |
 |-----|------|----------------|
 | `gitleaks` | gitleaks v8.24.3 | Secrets and credentials committed to git history |
-| `composer-audit` | composer audit (built-in, Composer ≥ 2.4) | Known CVEs in PHP dependencies (via composer.lock) |
+| `composer-audit` | composer audit (built-in, Composer ≥ 2.8) | Known CVEs in PHP dependencies (via composer.lock) |
 | `guarddog-php` | guarddog ⚠️ experimental | Supply-chain threats in Packagist packages (typosquatting, exfiltration, malicious code) |
 
 ## Usage
@@ -53,6 +53,7 @@ jobs:
 |-------|---------|-------------|
 | `working-directory` | `.` | Directory containing `composer.json` and `composer.lock` |
 | `fail-on-findings` | `true` | Fail the workflow if any scan detects issues |
+| `ignore-severity` | `""` | Space-separated severity levels to ignore in composer audit: `low`, `medium`, `high`, `critical`. Inverted compared to npm's `audit-level` — you list what to ignore rather than the minimum to fail on. Example: `"low medium"` fails only on high/critical. |
 
 ## What it does
 
@@ -77,4 +78,5 @@ The `guarddog-php` job uses guarddog's `packagist` subcommand, which exists but 
 - `composer.lock` must be committed. `composer audit` operates against the lockfile and will fail with a clear error if it is missing. Generate it with `composer install` or `composer update`.
 - If gitleaks flags a test fixture as a false positive, add an allowlist entry to `.gitleaks.toml` in the consuming repo. See the [gitleaks-scan action README](../actions/gitleaks-scan/README.md#handling-false-positives).
 - To suppress a specific `composer-audit` advisory, add it to the `config.audit.ignored` list in `composer.json`. See the [composer-audit action README](../actions/composer-audit/README.md#notes).
+- To tighten or loosen the vulnerability threshold, use `ignore-severity` (e.g. `"low medium"` to fail only on high/critical). Note the inverted logic compared to npm's `audit-level` — Composer requires you to specify which severities to suppress rather than a minimum failing level.
 - Start with `fail-on-findings: false` when adding to an existing repository to understand the current baseline before enabling hard failures.
