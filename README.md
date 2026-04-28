@@ -25,7 +25,7 @@ Copy the relevant workflow or action files into your repository and maintain the
 ## Current SHA
 
 ```
-f877740fc9a519be6b06492ffd69017337b8ca86
+36d580d22c46bd543824af243f4e37a95c808d38
 ```
 
 Use this SHA when referencing any workflow or action from this repository:
@@ -34,11 +34,11 @@ Use this SHA when referencing any workflow or action from this repository:
 # Reusable workflow
 jobs:
   ci:
-    uses: orangitfi/platform-tooling/.github/workflows/node-ci.yml@f877740fc9a519be6b06492ffd69017337b8ca86
+    uses: orangitfi/platform-tooling/.github/workflows/node-ci.yml@36d580d22c46bd543824af243f4e37a95c808d38
 
 # Composite action
 steps:
-  - uses: orangitfi/platform-tooling/.github/actions/slack-notify@f877740fc9a519be6b06492ffd69017337b8ca86
+  - uses: orangitfi/platform-tooling/.github/actions/slack-notify@36d580d22c46bd543824af243f4e37a95c808d38
 ```
 
 ### Bumping the SHA
@@ -46,7 +46,7 @@ steps:
 Every `uses:` line inside this repository is tagged with a `# pt-sha` comment so they can be found and updated in one command. After committing changes run:
 
 ```bash
-OLD=f877740fc9a519be6b06492ffd69017337b8ca86
+OLD=36d580d22c46bd543824af243f4e37a95c808d38
 NEW=$(git rev-parse HEAD)
 sed -i '' "s/${OLD}/${NEW}/g" README.md $(grep -rl "# pt-sha" .github/workflows/)
 git add README.md .github/workflows/
