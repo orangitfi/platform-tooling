@@ -4,7 +4,7 @@ Publish Markdown files from a directory to Confluence Cloud.
 Preserves folder structure as page hierarchy.
 
 Supports:
-  - Mermaid diagrams: pre-rendered to PNG via mmdc, uploaded as attachments
+  - Mermaid diagrams: converted to Confluence CloudScript macro (cloudscript-mermaid)
   - Local images: uploaded as Confluence attachments
   - Tables, fenced code blocks
 """
@@ -18,6 +18,29 @@ from pathlib import Path
 
 import markdown
 from atlassian import Confluence
+
+
+# ---------------------------------------------------------------------------
+# Mermaid macro (Confluence CloudScript app)
+# ---------------------------------------------------------------------------
+
+def convert_mermaid_blocks(md_content):
+    """
+    Replace ```mermaid ... ``` fenced blocks with Confluence cloudscript-mermaid macro HTML
+    before the standard markdown conversion runs.
+    Requires the 'CloudScript.io Mermaid' app to be installed in Confluence.
+    """
+    pattern = re.compile(r"```mermaid\s*\n(.*?)```", re.DOTALL)
+    def replace(match):
+        diagram = match.group(1).strip()
+        return (
+            '<ac:structured-macro ac:name="cloudscript-mermaid" ac:schema-version="1">'
+            "<ac:plain-text-body>"
+            f"<![CDATA[{diagram}]]>"
+            "</ac:plain-text-body>"
+            "</ac:structured-macro>"
+        )
+    return pattern.sub(replace, md_content)
 
 
 # ---------------------------------------------------------------------------
@@ -348,8 +371,9 @@ def publish_docs(
             title = prefixed(title, confluence_prefix)
 
             # --- Convert markdown to HTML ---
+            md_content_processed = convert_mermaid_blocks(md_content)
             html_content = markdown.markdown(
-                md_content, extensions=["tables", "fenced_code"]
+                md_content_processed, extensions=["tables", "fenced_code"]
             )
 
             # --- Determine parent page ---
