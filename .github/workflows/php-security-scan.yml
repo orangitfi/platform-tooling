@@ -37,6 +37,15 @@ on:
         required: false
         default: true
         type: boolean
+      ignore-severity:
+        description: >
+          Space-separated severity levels to ignore in composer audit.
+          Accepted values: low, medium, high, critical.
+          Example: "low medium" — only fails on high/critical advisories.
+          Requires Composer >= 2.8 (pre-installed on ubuntu-latest).
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -68,6 +77,7 @@ jobs:
         with:
           working-directory: ${{ inputs.working-directory }}
           fail-on-findings: ${{ inputs.fail-on-findings }}
+          ignore-severity: ${{ inputs.ignore-severity }}
 
   guarddog-php:
     name: Supply Chain Scan (guarddog)

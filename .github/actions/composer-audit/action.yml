@@ -1,7 +1,7 @@
 name: "Composer Audit"
 description: >
   Run composer audit against a project's composer.lock to detect known
-  vulnerabilities in PHP dependencies. Requires Composer >= 2.4 which is
+  vulnerabilities in PHP dependencies. Requires Composer >= 2.8 which is
   pre-installed on GitHub-hosted ubuntu-latest runners. No binary download
   is needed — composer audit is a built-in Composer command.
 
@@ -14,6 +14,14 @@ inputs:
     description: "Fail the job if vulnerabilities are found (default: true)"
     required: false
     default: "true"
+  ignore-severity:
+    description: >
+      Space-separated list of severity levels to ignore. Accepted values:
+      low, medium, high, critical. Example: "low medium" ignores low and
+      medium advisories and only fails on high/critical.
+      Requires Composer >= 2.8. Leave empty to report all severities.
+    required: false
+    default: ""
 
 outputs:
   result:
@@ -32,6 +40,7 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+        IGNORE_SEVERITY: ${{ inputs.ignore-severity }}
       run: |
         set -euo pipefail
 
@@ -43,14 +52,20 @@ runs:
           exit 1
         fi
 
-        # Verify Composer >= 2.4
+        # Verify Composer >= 2.8 (required for --ignore-severity)
         COMPOSER_VERSION="$(composer --version --no-ansi 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1)"
         COMPOSER_MAJOR="$(echo "${COMPOSER_VERSION}" | cut -d. -f1)"
         COMPOSER_MINOR="$(echo "${COMPOSER_VERSION}" | cut -d. -f2)"
-        if [ "${COMPOSER_MAJOR}" -lt 2 ] || { [ "${COMPOSER_MAJOR}" -eq 2 ] && [ "${COMPOSER_MINOR}" -lt 4 ]; }; then
-          echo "::error::composer audit requires Composer >= 2.4. Found: ${COMPOSER_VERSION}"
+        if [ "${COMPOSER_MAJOR}" -lt 2 ] || { [ "${COMPOSER_MAJOR}" -eq 2 ] && [ "${COMPOSER_MINOR}" -lt 8 ]; }; then
+          echo "::error::composer audit requires Composer >= 2.8. Found: ${COMPOSER_VERSION}"
           exit 1
         fi
+
+        # Build --ignore-severity flags (flag is repeatable, not comma-separated)
+        SEVERITY_FLAGS=""
+        for SEV in ${IGNORE_SEVERITY}; do
+          SEVERITY_FLAGS="${SEVERITY_FLAGS} --ignore-severity=${SEV}"
+        done
 
         {
           echo "## Composer Audit"
@@ -59,11 +74,15 @@ runs:
           echo "|---------|-------|"
           echo "| Working directory | \`${{ inputs.working-directory }}\` |"
           echo "| Composer version | \`${COMPOSER_VERSION}\` |"
+          if [ -n "${IGNORE_SEVERITY}" ]; then
+            echo "| Ignored severities | \`${IGNORE_SEVERITY}\` |"
+          fi
           echo ""
         } >> "${GITHUB_STEP_SUMMARY}"
 
         EXIT_CODE=0
-        composer audit --format=json --no-interaction 1>"${REPORT}" 2>/dev/null || EXIT_CODE=$?
+        # shellcheck disable=SC2086
+        composer audit --format=json --no-interaction ${SEVERITY_FLAGS} 1>"${REPORT}" 2>/dev/null || EXIT_CODE=$?
 
         TOTAL=0
         if command -v jq >/dev/null 2>&1 && [ -f "${REPORT}" ]; then
@@ -79,7 +98,8 @@ runs:
           echo "vulnerabilities-found=${TOTAL}" >> "${GITHUB_OUTPUT}"
 
           # Re-run without --format=json for human-readable summary output
-          HUMAN_OUTPUT="$(composer audit --no-interaction 2>&1 || true)"
+          # shellcheck disable=SC2086
+          HUMAN_OUTPUT="$(composer audit --no-interaction ${SEVERITY_FLAGS} 2>&1 || true)"
 
           {
             echo "**${TOTAL} vulnerability/vulnerabilities found.**"
