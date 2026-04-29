@@ -1,0 +1,161 @@
+# PHP Lint
+#
+# Reusable workflow that runs three jobs in parallel:
+#
+#   1. phpcs   — PHP_CodeSniffer: code style and formatting (PSR-12 by default)
+#                uses phpcs.xml / phpcs.xml.dist if found in the project root
+#   2. phpstan — static analysis: type errors, undefined variables, dead code
+#                uses phpstan.neon / phpstan.neon.dist if found in the project root
+#   3. docker-lint — hadolint against the Dockerfile
+#                    skipped cleanly if no Dockerfile is found
+#
+# Both phpcs and phpstan require the tools to be installed as Composer dev
+# dependencies (vendor/bin/phpcs and vendor/bin/phpstan). The workflow runs
+# composer install before each job so phpstan can resolve types from
+# project dependencies.
+#
+# Usage in a consuming repository:
+#
+#   jobs:
+#     lint:
+#       uses: orangitfi/platform-tooling/.github/workflows/php-lint.yml@<sha>
+#       with:
+#         working-directory: .
+
+name: PHP Lint
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Directory containing composer.json"
+        required: false
+        default: "."
+        type: string
+      run-phpcs:
+        description: "Run PHP_CodeSniffer (code style check)"
+        required: false
+        default: true
+        type: boolean
+      paths:
+        description: "Space-separated paths to lint when no tool config file is present (e.g. 'src tests')"
+        required: false
+        default: "src"
+        type: string
+      phpcs-standard:
+        description: "Coding standard for phpcs when no phpcs.xml is present (e.g. PSR12, PSR2)"
+        required: false
+        default: "PSR12"
+        type: string
+      run-phpstan:
+        description: "Run PHPStan (static analysis)"
+        required: false
+        default: true
+        type: boolean
+      phpstan-level:
+        description: "PHPStan analysis level (1-9) when no phpstan.neon is present"
+        required: false
+        default: "5"
+        type: string
+      dockerfile-path:
+        description: "Path to the Dockerfile relative to the repository root"
+        required: false
+        default: "Dockerfile"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  phpcs:
+    name: PHP_CodeSniffer
+    if: ${{ inputs.run-phpcs }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: composer install --no-interaction --prefer-dist --optimize-autoloader
+
+      - name: Run phpcs
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          PATHS: ${{ inputs.paths }}
+          PHPCS_STANDARD: ${{ inputs.phpcs-standard }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "vendor/bin/phpcs" ]; then
+            echo "::error::vendor/bin/phpcs not found. Add PHP_CodeSniffer as a dev dependency: composer require --dev squizlabs/php_codesniffer"
+            exit 1
+          fi
+
+          if [ -f "phpcs.xml" ] || [ -f "phpcs.xml.dist" ]; then
+            vendor/bin/phpcs
+          else
+            # shellcheck disable=SC2086
+            vendor/bin/phpcs --standard="${PHPCS_STANDARD}" ${PATHS}
+          fi
+
+  phpstan:
+    name: PHPStan
+    if: ${{ inputs.run-phpstan }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: composer install --no-interaction --prefer-dist --optimize-autoloader
+
+      - name: Run phpstan
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          PATHS: ${{ inputs.paths }}
+          PHPSTAN_LEVEL: ${{ inputs.phpstan-level }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "vendor/bin/phpstan" ]; then
+            echo "::error::vendor/bin/phpstan not found. Add PHPStan as a dev dependency: composer require --dev phpstan/phpstan"
+            exit 1
+          fi
+
+          if [ -f "phpstan.neon" ] || [ -f "phpstan.neon.dist" ]; then
+            vendor/bin/phpstan analyse --no-progress
+          else
+            # shellcheck disable=SC2086
+            vendor/bin/phpstan analyse --level="${PHPSTAN_LEVEL}" --no-progress ${PATHS}
+          fi
+
+  docker-lint:
+    name: Docker Lint (hadolint)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Check for Dockerfile
+        id: check
+        shell: bash
+        run: |
+          if [ -f "${{ inputs.dockerfile-path }}" ]; then
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+            echo "No Dockerfile found at '${{ inputs.dockerfile-path }}', skipping docker lint."
+          fi
+
+      - name: Lint Dockerfile
+        if: steps.check.outputs.exists == 'true'
+        uses: orangitfi/platform-tooling/.github/actions/docker-lint@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha
+        with:
+          dockerfile: ${{ inputs.dockerfile-path }}
+          working-directory: ${{ inputs.working-directory }}
