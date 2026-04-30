@@ -85,6 +85,17 @@ Located in `.github/workflows/`. All use `on: workflow_call` and never define th
 | [`python-vulnerability-scan.yml`](.github/workflows/python-vulnerability-scan.yml) | [📄](.github/workflows/python-vulnerability-scan.md) | Runs Syft + Grype vulnerability scans against the source code and the Docker image. Docker scan is optional. |
 | [`python-build-and-publish-docker.yml`](.github/workflows/python-build-and-publish-docker.yml) | [📄](.github/workflows/python-build-and-publish-docker.md) | Builds a Docker image and optionally pushes it to GCP Artifact Registry. Credentials are read from 1Password at runtime. |
 
+### PHP / Symfony / Composer
+
+| Workflow | Doc | Description |
+|----------|-----|-------------|
+| [`php-ci.yml`](.github/workflows/php-ci.yml) | [📄](.github/workflows/php-ci.md) | Full CI pipeline — security → lint + test (parallel) → vulnerability scan. Single `uses:` line replaces an entire CI file. |
+| [`php-daily.yml`](.github/workflows/php-daily.yml) | [📄](.github/workflows/php-daily.md) | Nightly pipeline — runs the full CI pipeline and an OWASP ZAP DAST scan in parallel. |
+| [`php-security-scan.yml`](.github/workflows/php-security-scan.yml) | [📄](.github/workflows/php-security-scan.md) | Runs gitleaks, composer-audit, and guarddog in parallel. Intended as the first gate in any PHP pipeline. |
+| [`php-lint.yml`](.github/workflows/php-lint.yml) | [📄](.github/workflows/php-lint.md) | Runs PHP_CodeSniffer and PHPStan in parallel. Docker lint is skipped cleanly when no Dockerfile is found. |
+| [`php-test.yml`](.github/workflows/php-test.yml) | [📄](.github/workflows/php-test.md) | Installs dependencies with `composer install` and runs PHPUnit. Covers unit tests only. |
+| [`php-vulnerability-scan.yml`](.github/workflows/php-vulnerability-scan.yml) | [📄](.github/workflows/php-vulnerability-scan.md) | Runs Syft + Grype vulnerability scans against the source code and the Docker image. Docker scan is optional. |
+
 ### Shared
 
 | Workflow | Doc | Description |
