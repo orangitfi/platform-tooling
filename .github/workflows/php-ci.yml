@@ -1,0 +1,149 @@
+# PHP CI
+#
+# Reusable workflow that wires together the full PHP / Composer CI pipeline:
+#
+#   security    — gitleaks + composer-audit + guarddog (gates everything below)
+#   lint        — phpcs + phpstan + hadolint              ┐
+#   test        — composer install + phpunit              ├─ parallel after security
+#   vulnerability-scan — Syft + Grype (after all above pass or are skipped)
+#
+# The consuming repo controls WHEN this runs. This workflow controls HOW.
+#
+# Usage in a consuming repository:
+#
+#   on: [push, pull_request, workflow_dispatch]
+#
+#   jobs:
+#     ci:
+#       uses: orangitfi/platform-tooling/.github/workflows/php-ci.yml@<sha>
+#       with:
+#         run-docker-scan: false
+#
+# See php-ci.md for full documentation and all parameter options.
+#
+# ─── SHA pinning ─────────────────────────────────────────────────────────────
+# The `uses:` lines below reference platform-tooling workflows at a specific
+# SHA. After committing this file, run the SHA bump process documented in the
+# root README to replace the SHA with the new commit SHA.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: CI
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Directory containing composer.json"
+        required: false
+        default: "."
+        type: string
+      # ── Lint inputs ──────────────────────────────────────────────────────
+      run-phpcs:
+        description: "Run PHP_CodeSniffer in the lint job"
+        required: false
+        default: true
+        type: boolean
+      phpcs-standard:
+        description: "phpcs coding standard when no phpcs.xml is present (e.g. PSR12)"
+        required: false
+        default: "PSR12"
+        type: string
+      run-phpstan:
+        description: "Run PHPStan in the lint job"
+        required: false
+        default: true
+        type: boolean
+      phpstan-level:
+        description: "PHPStan analysis level (1-9) when no phpstan.neon is present"
+        required: false
+        default: "5"
+        type: string
+      paths:
+        description: "Space-separated paths both lint tools scan when no tool config file is present"
+        required: false
+        default: "src"
+        type: string
+      dockerfile-path:
+        description: "Path to the Dockerfile relative to the repo root (used by lint and vulnerability scan)"
+        required: false
+        default: "Dockerfile"
+        type: string
+      # ── Test inputs ──────────────────────────────────────────────────────
+      test-command:
+        description: "Command to run tests (e.g. vendor/bin/phpunit --testsuite=Unit)"
+        required: false
+        default: "vendor/bin/phpunit"
+        type: string
+      composer-args:
+        description: "Extra arguments passed to composer install in the test job"
+        required: false
+        default: ""
+        type: string
+      # ── Vulnerability scan inputs ────────────────────────────────────────
+      fail-on-severity:
+        description: "Minimum Grype severity for the vulnerability scan: critical, high, medium, low, negligible"
+        required: false
+        default: "high"
+        type: string
+      run-docker-scan:
+        description: "Build and scan the Docker image in the vulnerability scan (set false for repos without a Dockerfile)"
+        required: false
+        default: true
+        type: boolean
+      image-name:
+        description: "Docker image name — used by the vulnerability scan"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # 1. Security audit — runs first, gates everything else
+  # ───────────────────────────────────────────────────────────────────────────
+  security:
+    name: Security Scan
+    uses: orangitfi/platform-tooling/.github/workflows/php-security-scan.yml@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha
+    with:
+      working-directory: ${{ inputs.working-directory }}
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 2. Lint + Test — parallel after security passes
+  # ───────────────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    needs: security
+    uses: orangitfi/platform-tooling/.github/workflows/php-lint.yml@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha
+    with:
+      working-directory:  ${{ inputs.working-directory }}
+      run-phpcs:          ${{ inputs.run-phpcs }}
+      phpcs-standard:     ${{ inputs.phpcs-standard }}
+      run-phpstan:        ${{ inputs.run-phpstan }}
+      phpstan-level:      ${{ inputs.phpstan-level }}
+      paths:              ${{ inputs.paths }}
+      dockerfile-path:    ${{ inputs.dockerfile-path }}
+
+  test:
+    name: Test
+    needs: security
+    uses: orangitfi/platform-tooling/.github/workflows/php-test.yml@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha
+    with:
+      working-directory: ${{ inputs.working-directory }}
+      test-command:      ${{ inputs.test-command }}
+      composer-args:     ${{ inputs.composer-args }}
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 3. Vulnerability scan — runs after all quality gates pass or are skipped
+  # ───────────────────────────────────────────────────────────────────────────
+  vulnerability-scan:
+    name: Vulnerability Scan
+    needs: [lint, test]
+    uses: orangitfi/platform-tooling/.github/workflows/php-vulnerability-scan.yml@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha
+    with:
+      working-directory: ${{ inputs.working-directory }}
+      fail-on-severity:  ${{ inputs.fail-on-severity }}
+      run-docker-scan:   ${{ inputs.run-docker-scan }}
+      dockerfile-path:   ${{ inputs.dockerfile-path }}
+      image-name:        ${{ inputs.image-name }}

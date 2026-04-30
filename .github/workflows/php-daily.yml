@@ -1,0 +1,161 @@
+# PHP Daily
+#
+# Reusable workflow for a daily security status run against a PHP / Symfony project.
+# Combines the full CI pipeline with an OWASP ZAP DAST scan in parallel:
+#
+#   ci    — full php-ci pipeline (security + lint + test + vuln scan)
+#   dast  — OWASP ZAP scan against the live staging/production URL
+#
+# Both jobs run in parallel. CI checks the current code and dependencies;
+# ZAP checks the running application. They are independent — a build failure
+# does not prevent the DAST scan from running, and vice versa.
+#
+# If target-url is not provided the dast job is skipped cleanly.
+#
+# The consuming repo controls WHEN this runs (typically a nightly schedule).
+# This workflow controls HOW.
+#
+# Usage in a consuming repository:
+#
+#   on:
+#     schedule:
+#       - cron: "0 3 * * *"   # 03:00 UTC every night
+#     workflow_dispatch:       # allow manual trigger
+#
+#   jobs:
+#     daily:
+#       uses: orangitfi/platform-tooling/.github/workflows/php-daily.yml@<sha>
+#       with:
+#         target-url: https://staging.myapp.com
+#
+# See php-daily.md for full documentation and all parameter options.
+#
+# ─── SHA pinning ─────────────────────────────────────────────────────────────
+# After committing this file, replace the SHA with the new commit SHA using
+# the bump process documented in the root README.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Daily Security
+
+on:
+  workflow_call:
+    inputs:
+      # ── CI inputs ────────────────────────────────────────────────────────
+      working-directory:
+        description: "Directory containing composer.json"
+        required: false
+        default: "."
+        type: string
+      run-phpcs:
+        description: "Run PHP_CodeSniffer in the lint job"
+        required: false
+        default: true
+        type: boolean
+      phpcs-standard:
+        description: "phpcs coding standard when no phpcs.xml is present"
+        required: false
+        default: "PSR12"
+        type: string
+      run-phpstan:
+        description: "Run PHPStan in the lint job"
+        required: false
+        default: true
+        type: boolean
+      phpstan-level:
+        description: "PHPStan analysis level (1-9) when no phpstan.neon is present"
+        required: false
+        default: "5"
+        type: string
+      paths:
+        description: "Space-separated paths both lint tools scan when no tool config file is present"
+        required: false
+        default: "src"
+        type: string
+      dockerfile-path:
+        description: "Path to the Dockerfile relative to the repo root"
+        required: false
+        default: "Dockerfile"
+        type: string
+      test-command:
+        description: "Command to run tests (e.g. vendor/bin/phpunit --testsuite=Unit)"
+        required: false
+        default: "vendor/bin/phpunit"
+        type: string
+      composer-args:
+        description: "Extra arguments passed to composer install in the test job"
+        required: false
+        default: ""
+        type: string
+      run-docker-scan:
+        description: "Build and scan the Docker image in the vulnerability scan"
+        required: false
+        default: true
+        type: boolean
+      image-name:
+        description: "Docker image name for the vulnerability scan"
+        required: false
+        default: ""
+        type: string
+      fail-on-severity:
+        description: "Minimum Grype severity for the vulnerability scan"
+        required: false
+        default: "high"
+        type: string
+      # ── DAST inputs ──────────────────────────────────────────────────────
+      target-url:
+        description: "URL of the running application to scan with ZAP. Leave empty to skip DAST."
+        required: false
+        default: ""
+        type: string
+      scan-type:
+        description: "ZAP scan type: baseline (passive, ~2 min) | full (active, 10-30 min) | api"
+        required: false
+        default: "baseline"
+        type: string
+      openapi-spec:
+        description: "OpenAPI spec URL or path — used only when scan-type is api"
+        required: false
+        default: ""
+        type: string
+      dast-fail-on-findings:
+        description: "Fail the DAST job if ZAP reports any alerts"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # Full CI pipeline — static security, lint, test, vulnerability scan
+  # ───────────────────────────────────────────────────────────────────────────
+  ci:
+    name: CI
+    uses: orangitfi/platform-tooling/.github/workflows/php-ci.yml@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha
+    with:
+      working-directory: ${{ inputs.working-directory }}
+      run-phpcs:         ${{ inputs.run-phpcs }}
+      phpcs-standard:    ${{ inputs.phpcs-standard }}
+      run-phpstan:       ${{ inputs.run-phpstan }}
+      phpstan-level:     ${{ inputs.phpstan-level }}
+      paths:             ${{ inputs.paths }}
+      dockerfile-path:   ${{ inputs.dockerfile-path }}
+      test-command:      ${{ inputs.test-command }}
+      composer-args:     ${{ inputs.composer-args }}
+      run-docker-scan:   ${{ inputs.run-docker-scan }}
+      image-name:        ${{ inputs.image-name }}
+      fail-on-severity:  ${{ inputs.fail-on-severity }}
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # DAST — dynamic scan against the live URL (skipped if target-url is empty)
+  # ───────────────────────────────────────────────────────────────────────────
+  dast:
+    name: DAST (OWASP ZAP)
+    uses: orangitfi/platform-tooling/.github/workflows/dast-scan.yml@f877740fc9a519be6b06492ffd69017337b8ca86 # pt-sha
+    with:
+      target-url:       ${{ inputs.target-url }}
+      scan-type:        ${{ inputs.scan-type }}
+      openapi-spec:     ${{ inputs.openapi-spec }}
+      fail-on-findings: ${{ inputs.dast-fail-on-findings }}
+      artifact-name:    zap-daily-report
