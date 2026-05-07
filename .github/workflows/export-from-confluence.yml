@@ -1,0 +1,106 @@
+name: Export Docs from Confluence
+
+on:
+  workflow_dispatch:
+    inputs:
+      space-key:
+        description: "Confluence space key (e.g. DOCS, TECH)"
+        required: false
+        default: ""
+      root-page-title:
+        description: "Title of the root page to export (leave empty to export the space homepage tree)"
+        required: false
+        default: ""
+      page-id:
+        description: "Export a single page by ID (no recursion). Overrides space-key."
+        required: false
+        default: ""
+      output-dir:
+        description: "Local directory to write exported files"
+        required: false
+        default: "docs"
+      max-depth:
+        description: "Maximum child page depth to export (-1 = unlimited)"
+        required: false
+        default: "-1"
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    env:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Install 1Password CLI
+        shell: bash
+        run: |
+          curl -sSfL https://downloads.1password.com/linux/tar/stable/x86_64/op_linux_amd64_v2.tar.gz \
+            | tar -xz -C /usr/local/bin
+          op --version
+
+      - name: Read Confluence credentials from 1Password
+        shell: bash
+        run: |
+          {
+            echo "CONFLUENCE_URL=$(op read 'op://orangit-documenter/confluence-credentials/url')"
+            echo "CONFLUENCE_USER=$(op read 'op://orangit-documenter/confluence-credentials/username')"
+            echo "CONFLUENCE_API_TOKEN=$(op read 'op://orangit-documenter/confluence-credentials/token')"
+          } >> "$GITHUB_ENV"
+
+      - name: Export from Confluence
+        uses: ./.github/actions/export-from-confluence
+        with:
+          confluence-url: ${{ env.CONFLUENCE_URL }}
+          confluence-user: ${{ env.CONFLUENCE_USER }}
+          confluence-token: ${{ env.CONFLUENCE_API_TOKEN }}
+          space-key: ${{ github.event.inputs.space-key }}
+          page-id: ${{ github.event.inputs.page-id }}
+          root-page-title: ${{ github.event.inputs.root-page-title }}
+          output-dir: ${{ github.event.inputs.output-dir }}
+          max-depth: ${{ github.event.inputs.max-depth }}
+
+      - name: Create pull request with exported files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="confluence-export/${{ github.run_id }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "$BRANCH"
+          git add "${{ github.event.inputs.output-dir }}"
+
+          if git diff --cached --quiet; then
+            echo "No changes to export — skipping pull request."
+            exit 0
+          fi
+
+          git commit -m "docs: export from Confluence (run ${{ github.run_id }})"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "docs: import from Confluence" \
+            --body "$(cat <<'EOF'
+          Automated export from Confluence.
+
+          - Space: \`${{ github.event.inputs.space-key }}\`
+          - Root page: \`${{ github.event.inputs.root-page-title || '(space homepage)' }}\`
+          - Page ID: \`${{ github.event.inputs.page-id || 'N/A' }}\`
+          - Output dir: \`${{ github.event.inputs.output-dir }}\`
+          - Max depth: \`${{ github.event.inputs.max-depth }}\`
+
+          Triggered by: @${{ github.actor }}
+          EOF
+          )" \
+            --head "$BRANCH" \
+            --base "${{ github.ref_name }}"
