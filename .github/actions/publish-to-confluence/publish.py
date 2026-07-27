@@ -235,7 +235,8 @@ def get_or_create_folder_page(
 
     title = prefixed(folder_page_title(docs_dir, folder_path), confluence_prefix)
 
-    # Search for existing page among parent's children
+    # Search for existing page among parent's children first (fast path,
+    # also confirms it's already correctly parented).
     try:
         children = conf.get_page_child_by_type(
             parent_id, type="page", start=0, limit=100
@@ -248,7 +249,36 @@ def get_or_create_folder_page(
     except Exception as e:
         print(f"  Warning: Could not check children: {e}")
 
-    # Create folder page if not found
+    # Confluence page titles must be unique across the whole space, not just
+    # among a given parent's children. A page with this title may already
+    # exist elsewhere (e.g. re-parented, created by a previous run under a
+    # different parent, or created manually) — creating a new page would
+    # raise BadRequestException: "A page with this title already exists".
+    # Look it up space-wide before falling back to creation, and reuse it
+    # (re-parenting it under the expected parent) if found.
+    try:
+        existing_page = conf.get_page_by_title(space=space_key, title=title)
+    except Exception as e:
+        print(f"  Warning: Could not check for existing page space-wide: {e}")
+        existing_page = None
+
+    if existing_page:
+        page_id = existing_page["id"]
+        print(f"  ✓ Found existing folder page elsewhere in space: {title} (id: {page_id})")
+        try:
+            conf.update_page(
+                page_id=page_id,
+                title=title,
+                body=existing_page.get("body", {}).get("storage", {}).get("value")
+                or f"<p>This section contains documentation for {title}.</p>",
+                parent_id=parent_id,
+            )
+        except Exception as e:
+            print(f"  Warning: Could not re-parent existing folder page {title}: {e}")
+        folder_pages[folder_key] = page_id
+        return page_id
+
+    # Create folder page if not found anywhere in the space
     print(f"  Creating folder page: {title} (under parent: {parent_id})")
     folder_page = conf.create_page(
         space=space_key,
