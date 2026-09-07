@@ -98,6 +98,49 @@ def get_current_version(conf, page_id):
     return 1
 
 
+def _http_error_detail(exc):
+    """Extract a readable HTTP status + body from a requests HTTPError, if any."""
+    resp = getattr(exc, "response", None)
+    if resp is None:
+        return None
+    try:
+        return f"HTTP {resp.status_code} — {resp.text[:500]}"
+    except Exception:
+        return None
+
+
+def create_page_safe(conf, space_id, title, body, parent_id=None):
+    """Create a page, falling back to an existing page on conflict.
+
+    Confluence Cloud sometimes returns HTTP 500 (rather than a clean 400/409)
+    when a page with the same title already exists in the space but was not
+    matched by find_page_by_title (e.g. different status). In that case we
+    re-resolve the existing page by title and reuse it instead of failing the
+    whole run. The full server response is surfaced for any other error.
+    """
+    try:
+        return conf.create_page(
+            space_id=space_id,
+            title=title,
+            body=body,
+            parent_id=parent_id,
+        )
+    except Exception as exc:
+        detail = _http_error_detail(exc)
+        # Attempt to recover by reusing an existing page with the same title.
+        existing = find_page_by_title(conf, space_id, title)
+        if existing:
+            print(
+                f"  ⚠ create_page failed ({detail or exc}); "
+                f"reusing existing page id {existing['id']}"
+            )
+            return existing
+        # Not recoverable — surface the full response and re-raise.
+        if detail:
+            print(f"  ✗ create_page failed for '{title}': {detail}")
+        raise
+
+
 def attach_file_v2(conf, page_id, file_path, name, content_type="image/png"):
     """Upload an attachment to a page.
 
@@ -361,7 +404,8 @@ def get_or_create_folder_page(
 
     # Create folder page if not found
     print(f"  Creating folder page: {title} (under parent: {parent_id})")
-    folder_page = conf.create_page(
+    folder_page = create_page_safe(
+        conf,
         space_id=space_id,
         title=title,
         body=f"<p>This section contains documentation for {title}.</p>",
@@ -517,10 +561,11 @@ def publish_docs(
             if existing:
                 page_id = existing["id"]
             else:
-                new_page = conf.create_page(
+                new_page = create_page_safe(
+                    conf,
                     space_id=space_id,
                     title=title,
-                    body="<p>Placeholder — content being uploaded.</p>",
+                    body="<p>Placeholder - content being uploaded.</p>",
                     parent_id=parent_id,
                 )
                 page_id = new_page["id"]
@@ -603,7 +648,8 @@ if __name__ == "__main__":
         resp = getattr(e, "response", None)
         if resp is not None:
             try:
-                print(f"  HTTP {resp.status_code} — {resp.text[:300]}")
+                print(f"  HTTP {resp.status_code} — {resp.text[:500]}")
+                print(f"  Request URL: {getattr(resp.request, 'method', '?')} {getattr(resp.request, 'url', '?')}")
             except Exception:
                 pass
         sys.exit(1)
