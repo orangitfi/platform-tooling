@@ -68,7 +68,15 @@ def find_page_by_title(conf, space_id, title):
     Replaces v1 ``get_page_by_title``. ``get_pages`` returns a list of v2 page
     objects; titles are unique per space so at most one match is expected.
     """
-    pages = conf.get_pages(space_id=space_id, title=title, limit=50)
+    # NOTE: pass get_body=True to avoid an atlassian-python-api v5 bug where
+    # get_pages injects `body-format=none` (a literal string) as a query param
+    # when no body is requested. The v2 API rejects "none" with
+    # HTTP 400 INVALID_REQUEST_PARAMETER. Requesting the body skips that branch.
+    pages = conf.get_pages(space_id=space_id, title=title, limit=50, get_body=True)
+    # get_pages may return a bare list of pages or a paginated dict
+    # ({"results": [...]}) depending on the atlassian-python-api patch version.
+    if isinstance(pages, dict):
+        pages = pages.get("results", [])
     for page in pages or []:
         if page.get("title") == title:
             return page
@@ -323,8 +331,12 @@ def get_or_create_folder_page(
 
     # Search for existing page among parent's children
     try:
-        children = conf.get_child_pages(parent_id, limit=100)
-        for child in children:
+        # get_body=True works around the same v5 `body-format=none` bug that
+        # affects get_pages (see find_page_by_title).
+        children = conf.get_child_pages(parent_id, limit=100, get_body=True)
+        if isinstance(children, dict):
+            children = children.get("results", [])
+        for child in children or []:
             if child["title"] == title:
                 print(f"  ✓ Found folder page: {title} (id: {child['id']})")
                 folder_pages[folder_key] = child["id"]

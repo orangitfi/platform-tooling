@@ -1,2 +1,2 @@
-atlassian-python-api>=5,<6
+atlassian-python-api==5.0.4
 markdown
