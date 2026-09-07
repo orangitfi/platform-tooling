@@ -116,7 +116,9 @@ def test_find_page_by_title_match():
     ]
     page = publish.find_page_by_title(conf, "999", "Target")
     assert page["id"] == "2"
-    conf.get_pages.assert_called_once_with(space_id="999", title="Target", limit=50)
+    conf.get_pages.assert_called_once_with(
+        space_id="999", title="Target", limit=50, get_body=True
+    )
 
 
 def test_find_page_by_title_no_match():
@@ -217,30 +219,32 @@ def test_collect_local_images_missing(tmp_path, capsys):
 
 def test_get_or_create_folder_page_found_existing():
     conf = MagicMock()
-    conf.get_child_pages.return_value = [{"id": "77", "title": "Adr"}]
+    conf.get.return_value = {"results": [{"id": "77", "title": "Adr"}]}
     folder_pages = {}
     docs = Path("/docs")
     pid = publish.get_or_create_folder_page(
         conf, "sid", docs / "adr", "root", folder_pages, docs
     )
     assert pid == "77"
-    conf.create_page.assert_not_called()
-    conf.get_child_pages.assert_called_once_with("root", limit=100)
+    conf.post.assert_not_called()
+    conf.get.assert_called_once_with("api/v2/pages/root/children", params={"limit": 100})
 
 
 def test_get_or_create_folder_page_creates_with_space_id():
     conf = MagicMock()
-    conf.get_child_pages.return_value = []
-    conf.create_page.return_value = {"id": "88"}
+    conf.get.return_value = {"results": []}
+    conf.get_endpoint.return_value = "api/v2/pages"
+    conf.post.return_value = {"id": "88"}
     folder_pages = {}
     docs = Path("/docs")
     pid = publish.get_or_create_folder_page(
         conf, "sid", docs / "adr", "root", folder_pages, docs
     )
     assert pid == "88"
-    _, kwargs = conf.create_page.call_args
-    assert kwargs["space_id"] == "sid"
-    assert kwargs["parent_id"] == "root"
+    _, kwargs = conf.post.call_args
+    payload = kwargs["data"]
+    assert payload["spaceId"] == "sid"
+    assert payload["parentId"] == "root"
 
 
 def test_get_or_create_folder_page_cached():
@@ -250,7 +254,7 @@ def test_get_or_create_folder_page_cached():
         conf, "sid", Path("/docs/adr"), "root", folder_pages, Path("/docs")
     )
     assert pid == "cached"
-    conf.get_child_pages.assert_not_called()
+    conf.get.assert_not_called()
 
 
 def test_get_nested_parent_id_root_level():
@@ -265,8 +269,9 @@ def test_get_nested_parent_id_root_level():
 
 def test_get_nested_parent_id_nested():
     conf = MagicMock()
-    conf.get_child_pages.return_value = []
-    conf.create_page.side_effect = [{"id": "a"}, {"id": "b"}]
+    conf.get.return_value = {"results": []}
+    conf.get_endpoint.return_value = "api/v2/pages"
+    conf.post.side_effect = [{"id": "a"}, {"id": "b"}]
     pid = publish.get_nested_parent_id(
         conf, "sid", Path("poc/adr/file.md"), Path("/docs"), "root", {}
     )
@@ -287,10 +292,16 @@ def test_publish_docs_creates_and_updates(tmp_path):
     conf.get_space_by_key.return_value = {"id": 5, "key": "OKB", "name": "KB"}
     # No existing pages anywhere.
     conf.get_pages.return_value = []
-    conf.create_page.side_effect = [
+    conf.get_endpoint.return_value = "api/v2/pages"
+    conf.post.side_effect = [
         {"id": "root"},  # root page
         {"id": "p1"},  # index page
     ]
+    conf.get_page_by_id.return_value = {
+        "id": "p1",
+        "status": "current",
+        "version": {"number": 1},
+    }
 
     with patch.object(publish, "ConfluenceV2", return_value=conf):
         publish.publish_docs(
@@ -302,15 +313,17 @@ def test_publish_docs_creates_and_updates(tmp_path):
             "Documentation",
         )
 
-    # Root + page created with space_id (not space key).
-    for _, kwargs in conf.create_page.call_args_list:
-        assert "space_id" in kwargs
-        assert "space" not in kwargs
-    # update_page called without parent_id/space (v2 semantics).
-    assert conf.update_page.called
-    _, ukwargs = conf.update_page.call_args
-    assert "parent_id" not in ukwargs
-    assert "space" not in ukwargs
+    # Root + page created via explicit v2 POST with spaceId (not space key).
+    for _, kwargs in conf.post.call_args_list:
+        payload = kwargs["data"]
+        assert "spaceId" in payload
+        assert payload["body"]["representation"] == "storage"
+    # Content page updated via explicit v2 PUT (update_page_content).
+    assert conf.put.called
+    _, ukwargs = conf.put.call_args
+    upayload = ukwargs["data"]
+    assert upayload["body"]["representation"] == "storage"
+    assert "version" in upayload
 
 
 def test_publish_docs_uses_existing_root(tmp_path):
@@ -321,13 +334,19 @@ def test_publish_docs_uses_existing_root(tmp_path):
     conf = MagicMock()
     conf.get_space_by_key.return_value = {"id": 5, "key": "OKB", "name": "KB"}
 
-    def get_pages(space_id, title, limit):
+    def get_pages(space_id, title, limit, get_body=False):
         if title == "Documentation":
             return [{"id": "root", "title": "Documentation"}]
         return []
 
     conf.get_pages.side_effect = get_pages
-    conf.create_page.return_value = {"id": "p1"}
+    conf.get_endpoint.return_value = "api/v2/pages"
+    conf.post.return_value = {"id": "p1"}
+    conf.get_page_by_id.return_value = {
+        "id": "p1",
+        "status": "current",
+        "version": {"number": 1},
+    }
 
     with patch.object(publish, "ConfluenceV2", return_value=conf):
         publish.publish_docs(
@@ -340,7 +359,7 @@ def test_publish_docs_uses_existing_root(tmp_path):
         )
 
     # Root already existed → only the content page is created.
-    assert conf.create_page.call_count == 1
+    assert conf.post.call_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -419,7 +438,13 @@ def test_main_happy_path(monkeypatch, tmp_path):
     conf = MagicMock()
     conf.get_space_by_key.return_value = {"id": 5, "key": "OKB", "name": "KB"}
     conf.get_pages.return_value = []
-    conf.create_page.side_effect = [{"id": "root"}, {"id": "p1"}]
+    conf.get_endpoint.return_value = "api/v2/pages"
+    conf.post.side_effect = [{"id": "root"}, {"id": "p1"}]
+    conf.get_page_by_id.return_value = {
+        "id": "p1",
+        "status": "current",
+        "version": {"number": 1},
+    }
 
     code = compile(PUBLISH_PATH.read_text(), str(PUBLISH_PATH), "exec")
     ns = {"__name__": "__main__"}
@@ -439,7 +464,8 @@ def test_publish_docs_skips_templates(tmp_path):
     conf = MagicMock()
     conf.get_space_by_key.return_value = {"id": 5, "key": "OKB", "name": "KB"}
     conf.get_pages.return_value = []
-    conf.create_page.return_value = {"id": "root"}
+    conf.get_endpoint.return_value = "api/v2/pages"
+    conf.post.return_value = {"id": "root"}
 
     with patch.object(publish, "ConfluenceV2", return_value=conf):
         publish.publish_docs(
@@ -452,4 +478,4 @@ def test_publish_docs_skips_templates(tmp_path):
         )
 
     # Only the root page is created; template file is skipped.
-    assert conf.create_page.call_count == 1
+    assert conf.post.call_count == 1

@@ -84,6 +84,21 @@ def find_page_by_title(conf, space_id, title):
     return None
 
 
+def get_child_pages_v2(conf, parent_id, limit=100):
+    """Return child pages of a page using the correct v2 endpoint.
+
+    The library's get_child_pages builds `api/v2/pages/{id}/children/page`,
+    which returns 404. The correct v2 endpoint is `api/v2/pages/{id}/children`.
+    We call it directly and normalise the result to a list of page dicts.
+    """
+    endpoint = f"api/v2/pages/{parent_id}/children"
+    params = {"limit": limit}
+    result = conf.get(endpoint, params=params)
+    if isinstance(result, dict):
+        return result.get("results", [])
+    return result or []
+
+
 def get_current_version(conf, page_id):
     """Return the current version number of a page.
 
@@ -147,21 +162,29 @@ def _http_error_detail(exc):
 
 
 def create_page_safe(conf, space_id, title, body, parent_id=None):
-    """Create a page, falling back to an existing page on conflict.
+    """Create a page via an explicit v2 POST, reusing an existing page on conflict.
 
-    Confluence Cloud sometimes returns HTTP 500 (rather than a clean 400/409)
-    when a page with the same title already exists in the space but was not
-    matched by find_page_by_title (e.g. different status). In that case we
-    re-resolve the existing page by title and reuse it instead of failing the
-    whole run. The full server response is surfaced for any other error.
+    The library's create_page sends the body as {storage:{value}} (v1-style
+    nested form). The Confluence v2 create schema expects the flat form
+    {representation:'storage', value:'...'}, and the mismatch produces an opaque
+    HTTP 500. We therefore build the v2 POST ourselves.
+
+    If create still fails (e.g. a page with the same title already exists in the
+    space but was not matched by find_page_by_title), we re-resolve the existing
+    page by title and reuse it instead of failing the whole run.
     """
+    payload = {
+        "spaceId": str(space_id),
+        "status": "current",
+        "title": title,
+        "body": {"representation": "storage", "value": body},
+    }
+    if parent_id:
+        payload["parentId"] = str(parent_id)
+
+    endpoint = conf.get_endpoint("page")
     try:
-        return conf.create_page(
-            space_id=space_id,
-            title=title,
-            body=body,
-            parent_id=parent_id,
-        )
+        return conf.post(endpoint, data=payload)
     except Exception as exc:
         detail = _http_error_detail(exc)
         # Attempt to recover by reusing an existing page with the same title.
@@ -460,13 +483,11 @@ def get_or_create_folder_page(
 
     # Search for existing page among parent's children
     try:
-        # get_body=True works around the same v5 `body-format=none` bug that
-        # affects get_pages (see find_page_by_title).
-        children = conf.get_child_pages(parent_id, limit=100, get_body=True)
-        if isinstance(children, dict):
-            children = children.get("results", [])
+        # Use the correct v2 children endpoint (the library's get_child_pages
+        # builds a 404 URL). Child listing returns id/title/status per page.
+        children = get_child_pages_v2(conf, parent_id, limit=100)
         for child in children or []:
-            if child["title"] == title:
+            if child.get("title") == title:
                 print(f"  ✓ Found folder page: {title} (id: {child['id']})")
                 folder_pages[folder_key] = child["id"]
                 return child["id"]
@@ -547,7 +568,8 @@ def publish_docs(
         root_page_id = root_page["id"]
     else:
         print(f"Creating root page: {root_page_title_prefixed}")
-        root_page = conf.create_page(
+        root_page = create_page_safe(
+            conf,
             space_id=space_id,
             title=root_page_title_prefixed,
             body="<p>This is the root documentation page. Content is auto-generated from GitHub.</p>",
