@@ -63,24 +63,44 @@ runs:
       run: |
         python - <<'EOF'
         import os
-        from atlassian import Confluence
+        import sys
+        import warnings
 
-        conf = Confluence(
+        from atlassian import ConfluenceV2
+
+        # ConfluenceV2 warns that *V1 methods* are deprecated on construction.
+        # We only use V2 methods, so silence this specific noise.
+        warnings.filterwarnings(
+            "ignore",
+            message="V1 methods are deprecated in ConfluenceCloud.*",
+            category=DeprecationWarning,
+        )
+
+        # ConfluenceV2 is cloud-only — no `cloud=True` flag.
+        conf = ConfluenceV2(
             url=os.environ['CONFLUENCE_URL'],
             username=os.environ['CONFLUENCE_USER'],
             password=os.environ['CONFLUENCE_API_TOKEN'],
-            cloud=True
         )
 
-        # Test connection
+        # Test connection using the v2 space API.
         try:
-            space = conf.get_space(os.environ['CONFLUENCE_SPACE_KEY'])
+            space = conf.get_space_by_key(os.environ['CONFLUENCE_SPACE_KEY'])
+            if not isinstance(space, dict) or 'name' not in space:
+                raise RuntimeError(f"Unexpected space response (not JSON dict): {space!r}")
             print(f"✓ Successfully connected to space: {space['name']}")
             print(f"  Space key: {space['key']}")
             print(f"  Space URL: {space['_links']['webui']}")
         except Exception as e:
-            print(f"✗ Failed to connect to Confluence space. Check credentials and space key.")
-            exit(1)
+            # Surface the real error instead of a misleading generic message.
+            print(f"✗ Failed to connect to Confluence space: {type(e).__name__}: {e}")
+            resp = getattr(e, "response", None)
+            if resp is not None:
+                try:
+                    print(f"  HTTP {resp.status_code} — {resp.text[:300]}")
+                except Exception:
+                    pass
+            sys.exit(1)
         EOF
 
     - name: Publish to Confluence

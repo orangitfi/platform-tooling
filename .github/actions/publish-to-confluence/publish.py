@@ -3,6 +3,8 @@
 Publish Markdown files from a directory to Confluence Cloud.
 Preserves folder structure as page hierarchy.
 
+Uses atlassian-python-api v5+ (``ConfluenceV2``, Confluence Cloud REST API v2).
+
 Supports:
   - Mermaid diagrams: converted to Confluence CloudScript macro (cloudscript-mermaid)
   - Local images: uploaded as Confluence attachments
@@ -14,15 +16,83 @@ import re
 import subprocess
 import sys
 import tempfile
+import warnings
 from pathlib import Path
 
 import markdown
-from atlassian import Confluence
+from atlassian import ConfluenceV2
+
+# ``ConfluenceV2`` emits a blanket DeprecationWarning on construction warning
+# that *V1 methods* are deprecated. We only use V2 methods, so this warning is
+# noise — silence just this message to keep CI logs readable.
+warnings.filterwarnings(
+    "ignore",
+    message="V1 methods are deprecated in ConfluenceCloud.*",
+    category=DeprecationWarning,
+)
+
+
+# ---------------------------------------------------------------------------
+# Confluence client helpers (v2 API)
+# ---------------------------------------------------------------------------
+
+
+def make_client(confluence_url, confluence_user, confluence_token):
+    """Create a ConfluenceV2 (Cloud) client.
+
+    ``ConfluenceV2`` is cloud-only, so the legacy ``cloud=True`` flag is dropped.
+    """
+    return ConfluenceV2(
+        url=confluence_url,
+        username=confluence_user,
+        password=confluence_token,
+    )
+
+
+def resolve_space_id(conf, space_key):
+    """Resolve a human space key (e.g. ``OKB``) to its numeric v2 space id.
+
+    The v2 ``create_page`` API requires ``space_id`` rather than the space key.
+    """
+    space = conf.get_space_by_key(space_key)
+    if not isinstance(space, dict) or "id" not in space:
+        raise RuntimeError(
+            f"Unexpected response resolving space '{space_key}': {space!r}"
+        )
+    return str(space["id"])
+
+
+def find_page_by_title(conf, space_id, title):
+    """Return the first page dict matching ``title`` in the space, else None.
+
+    Replaces v1 ``get_page_by_title``. ``get_pages`` returns a list of v2 page
+    objects; titles are unique per space so at most one match is expected.
+    """
+    pages = conf.get_pages(space_id=space_id, title=title, limit=50)
+    for page in pages or []:
+        if page.get("title") == title:
+            return page
+    return None
+
+
+def attach_file_v2(conf, page_id, file_path, name, content_type="image/png"):
+    """Upload an attachment to a page.
+
+    The v2 API has no attachment method, so we use the still-supported v1 REST
+    endpoint over the same authenticated session held by the client.
+    ``X-Atlassian-Token: no-check`` is required to bypass XSRF checks on upload.
+    """
+    endpoint = f"rest/api/content/{page_id}/child/attachment"
+    headers = {"X-Atlassian-Token": "no-check"}
+    with open(file_path, "rb") as fh:
+        files = {"file": (name, fh, content_type)}
+        conf.post(endpoint, headers=headers, files=files)
 
 
 # ---------------------------------------------------------------------------
 # Mermaid macro (Confluence CloudScript app)
 # ---------------------------------------------------------------------------
+
 
 def convert_mermaid_blocks(md_content):
     """
@@ -31,6 +101,7 @@ def convert_mermaid_blocks(md_content):
     Requires the 'CloudScript.io Mermaid' app to be installed in Confluence.
     """
     pattern = re.compile(r"```mermaid\s*\n(.*?)```", re.DOTALL)
+
     def replace(match):
         diagram = match.group(1).strip()
         return (
@@ -40,12 +111,14 @@ def convert_mermaid_blocks(md_content):
             "</ac:plain-text-body>"
             "</ac:structured-macro>"
         )
+
     return pattern.sub(replace, md_content)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def prefixed(title, prefix):
     """Prepend prefix to a page title, or return the title unchanged if prefix is empty."""
@@ -79,6 +152,7 @@ def folder_page_title(docs_dir, folder_path):
 # Mermaid rendering
 # ---------------------------------------------------------------------------
 
+
 def render_mermaid_diagrams(md_content, tmp_dir):
     """
     Find all ```mermaid ... ``` blocks in the markdown, render each to a PNG
@@ -86,7 +160,7 @@ def render_mermaid_diagrams(md_content, tmp_dir):
       - modified md_content with blocks replaced by ![mermaid-N](path/to/N.png)
       - list of (attachment_name, png_path) tuples for later upload
     """
-    pattern = re.compile(r'```mermaid\s*\n(.*?)\n```', re.DOTALL)
+    pattern = re.compile(r"```mermaid\s*\n(.*?)\n```", re.DOTALL)
     attachments = []
     counter = [0]
 
@@ -107,10 +181,14 @@ def render_mermaid_diagrams(md_content, tmp_dir):
             subprocess.run(
                 [
                     "mmdc",
-                    "-i", str(mmd_file),
-                    "-o", str(png_file),
-                    "--backgroundColor", "white",
-                    "--puppeteerConfigFile", str(puppeteer_cfg),
+                    "-i",
+                    str(mmd_file),
+                    "-o",
+                    str(png_file),
+                    "--backgroundColor",
+                    "white",
+                    "--puppeteerConfigFile",
+                    str(puppeteer_cfg),
                 ],
                 check=True,
                 capture_output=True,
@@ -138,16 +216,17 @@ def render_mermaid_diagrams(md_content, tmp_dir):
 # Image handling
 # ---------------------------------------------------------------------------
 
+
 def collect_local_images(md_content, md_file_path):
     """
     Find all local image references in markdown (![alt](path)) and return a
     list of (alt, abs_path, original_ref) tuples.  Remote URLs are skipped.
     """
-    pattern = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
+    pattern = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
     images = []
     for m in pattern.finditer(md_content):
         alt, ref = m.group(1), m.group(2)
-        if ref.startswith("http://") or ref.startswith("https://"):
+        if ref.startswith(("http://", "https://")):
             continue
         abs_path = (md_file_path.parent / ref).resolve()
         if abs_path.exists():
@@ -165,12 +244,7 @@ def upload_attachments(conf, page_id, attachments):
     uploaded = set()
     for name, path in attachments:
         try:
-            conf.attach_file(
-                str(path),
-                name=name,
-                page_id=page_id,
-                content_type="image/png",
-            )
+            attach_file_v2(conf, page_id, str(path), name, content_type="image/png")
             uploaded.add(name)
             print(f"  ✓ Uploaded attachment: {name}")
         except Exception as e:
@@ -185,6 +259,7 @@ def replace_images_with_ac_macros(html_content, image_map):
 
     image_map: dict of {original_ref_or_abs_path_str: attachment_name}
     """
+
     def replace_img(m):
         src = m.group(1)
         alt = m.group(2) if m.group(2) else ""
@@ -194,7 +269,7 @@ def replace_images_with_ac_macros(html_content, image_map):
             return (
                 f'<ac:image ac:alt="{alt}">'
                 f'<ri:attachment ri:filename="{name}" />'
-                f'</ac:image>'
+                f"</ac:image>"
             )
         return m.group(0)
 
@@ -206,10 +281,20 @@ def replace_images_with_ac_macros(html_content, image_map):
     )
     html_content = re.sub(
         r'<img\s+alt="([^"]*)"(?:\s+src="([^"]+)")?[^>]*/?>',
-        lambda m: replace_img(type('M', (), {
-            'group': lambda self, n: m.group(2) if n == 1 else m.group(1),
-            '__call__': lambda self: None,
-        })()) if m.group(2) else m.group(0),
+        lambda m: (
+            replace_img(
+                type(
+                    "M",
+                    (),
+                    {
+                        "group": lambda self, n: m.group(2) if n == 1 else m.group(1),
+                        "__call__": lambda self: None,
+                    },
+                )()
+            )
+            if m.group(2)
+            else m.group(0)
+        ),
         html_content,
     )
     return html_content
@@ -219,9 +304,10 @@ def replace_images_with_ac_macros(html_content, image_map):
 # Confluence page hierarchy
 # ---------------------------------------------------------------------------
 
+
 def get_or_create_folder_page(
     conf,
-    space_key,
+    space_id,
     folder_path,
     parent_id,
     folder_pages,
@@ -235,12 +321,9 @@ def get_or_create_folder_page(
 
     title = prefixed(folder_page_title(docs_dir, folder_path), confluence_prefix)
 
-    # Search for existing page among parent's children first (fast path,
-    # also confirms it's already correctly parented).
+    # Search for existing page among parent's children
     try:
-        children = conf.get_page_child_by_type(
-            parent_id, type="page", start=0, limit=100
-        )
+        children = conf.get_child_pages(parent_id, limit=100)
         for child in children:
             if child["title"] == title:
                 print(f"  ✓ Found folder page: {title} (id: {child['id']})")
@@ -249,39 +332,10 @@ def get_or_create_folder_page(
     except Exception as e:
         print(f"  Warning: Could not check children: {e}")
 
-    # Confluence page titles must be unique across the whole space, not just
-    # among a given parent's children. A page with this title may already
-    # exist elsewhere (e.g. re-parented, created by a previous run under a
-    # different parent, or created manually) — creating a new page would
-    # raise BadRequestException: "A page with this title already exists".
-    # Look it up space-wide before falling back to creation, and reuse it
-    # (re-parenting it under the expected parent) if found.
-    try:
-        existing_page = conf.get_page_by_title(space=space_key, title=title)
-    except Exception as e:
-        print(f"  Warning: Could not check for existing page space-wide: {e}")
-        existing_page = None
-
-    if existing_page:
-        page_id = existing_page["id"]
-        print(f"  ✓ Found existing folder page elsewhere in space: {title} (id: {page_id})")
-        try:
-            conf.update_page(
-                page_id=page_id,
-                title=title,
-                body=existing_page.get("body", {}).get("storage", {}).get("value")
-                or f"<p>This section contains documentation for {title}.</p>",
-                parent_id=parent_id,
-            )
-        except Exception as e:
-            print(f"  Warning: Could not re-parent existing folder page {title}: {e}")
-        folder_pages[folder_key] = page_id
-        return page_id
-
-    # Create folder page if not found anywhere in the space
+    # Create folder page if not found
     print(f"  Creating folder page: {title} (under parent: {parent_id})")
     folder_page = conf.create_page(
-        space=space_key,
+        space_id=space_id,
         title=title,
         body=f"<p>This section contains documentation for {title}.</p>",
         parent_id=parent_id,
@@ -292,7 +346,7 @@ def get_or_create_folder_page(
 
 def get_nested_parent_id(
     conf,
-    space_key,
+    space_id,
     rel_path,
     docs_dir,
     root_page_id,
@@ -310,7 +364,7 @@ def get_nested_parent_id(
         folder_path = docs_dir / Path(*parent_parts[: i + 1])
         current_parent_id = get_or_create_folder_page(
             conf,
-            space_key,
+            space_id,
             folder_path,
             current_parent_id,
             folder_pages,
@@ -325,6 +379,7 @@ def get_nested_parent_id(
 # Main publisher
 # ---------------------------------------------------------------------------
 
+
 def publish_docs(
     confluence_url,
     confluence_user,
@@ -336,29 +391,29 @@ def publish_docs(
 ):
     """Publish all markdown files to Confluence"""
 
-    conf = Confluence(
-        url=confluence_url,
-        username=confluence_user,
-        password=confluence_token,
-        cloud=True,
-    )
+    conf = make_client(confluence_url, confluence_user, confluence_token)
+
+    # Resolve the space key to the numeric space id required by the v2 API.
+    space_id = resolve_space_id(conf, space_key)
 
     # Get or create root page
     root_page_title_prefixed = prefixed(root_page_title, confluence_prefix)
     print(f"Setting up root page: {root_page_title_prefixed}")
-    root_page = conf.get_page_by_title(space=space_key, title=root_page_title_prefixed)
+    root_page = find_page_by_title(conf, space_id, root_page_title_prefixed)
     if root_page:
         print(f"✓ Found root page: {root_page_title_prefixed}")
         root_page_id = root_page["id"]
     else:
         print(f"Creating root page: {root_page_title_prefixed}")
         root_page = conf.create_page(
-            space=space_key,
+            space_id=space_id,
             title=root_page_title_prefixed,
             body="<p>This is the root documentation page. Content is auto-generated from GitHub.</p>",
         )
         if not root_page:
-            raise RuntimeError(f"Failed to create root page: {root_page_title_prefixed}")
+            raise RuntimeError(
+                f"Failed to create root page: {root_page_title_prefixed}"
+            )
         print(f"✓ Created root page: {root_page_title_prefixed}")
         root_page_id = root_page["id"]
 
@@ -387,7 +442,9 @@ def publish_docs(
                 md_content = f.read()
 
             # --- Mermaid: render diagrams to PNG, replace blocks with img refs ---
-            md_content, mermaid_attachments = render_mermaid_diagrams(md_content, tmp_dir)
+            md_content, mermaid_attachments = render_mermaid_diagrams(
+                md_content, tmp_dir
+            )
 
             # --- Collect local images referenced in markdown ---
             local_images = collect_local_images(md_content, md_file)
@@ -420,7 +477,7 @@ def publish_docs(
             # --- Determine parent page ---
             parent_id = get_nested_parent_id(
                 conf,
-                space_key,
+                space_id,
                 rel_path,
                 docs_dir,
                 root_page_id,
@@ -429,12 +486,12 @@ def publish_docs(
             )
 
             # --- Create or update page first (need page_id for attachments) ---
-            existing = conf.get_page_by_title(space=space_key, title=title)
+            existing = find_page_by_title(conf, space_id, title)
             if existing:
                 page_id = existing["id"]
             else:
                 new_page = conf.create_page(
-                    space=space_key,
+                    space_id=space_id,
                     title=title,
                     body="<p>Placeholder — content being uploaded.</p>",
                     parent_id=parent_id,
@@ -464,11 +521,12 @@ def publish_docs(
                 html_content = replace_images_with_ac_macros(html_content, image_map)
 
             # --- Final update with real content ---
+            # The v2 update_page auto-increments the version and does not take a
+            # space or parent_id (hierarchy is set at creation time).
             conf.update_page(
                 page_id=page_id,
                 title=title,
                 body=html_content,
-                parent_id=parent_id,
             )
             print(f"  ✓ Updated: {title}")
 
@@ -509,4 +567,11 @@ if __name__ == "__main__":
         print(
             f"\n✗ Error: {type(e).__name__}: {e.args[0] if e.args else 'unknown error'}"
         )
+        # Surface HTTP status/body if present, to avoid cryptic failures.
+        resp = getattr(e, "response", None)
+        if resp is not None:
+            try:
+                print(f"  HTTP {resp.status_code} — {resp.text[:300]}")
+            except Exception:
+                pass
         sys.exit(1)
