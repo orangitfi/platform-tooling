@@ -83,6 +83,21 @@ def find_page_by_title(conf, space_id, title):
     return None
 
 
+def get_current_version(conf, page_id):
+    """Return the current version number of a page.
+
+    We fetch this ourselves (with get_body=True) so we can pass an explicit
+    ``version`` to ``update_page``. That avoids update_page's internal call to
+    ``get_page_by_id(..., get_body=False)``, which triggers the same
+    atlassian-python-api v5 bug that injects ``body-format=none`` and is
+    rejected by the v2 API with HTTP 400 INVALID_REQUEST_PARAMETER.
+    """
+    page = conf.get_page_by_id(page_id, get_body=True)
+    if isinstance(page, dict):
+        return page.get("version", {}).get("number", 1)
+    return 1
+
+
 def attach_file_v2(conf, page_id, file_path, name, content_type="image/png"):
     """Upload an attachment to a page.
 
@@ -535,10 +550,15 @@ def publish_docs(
             # --- Final update with real content ---
             # The v2 update_page auto-increments the version and does not take a
             # space or parent_id (hierarchy is set at creation time).
+            # We pass an explicit version so update_page does not internally call
+            # get_page_by_id(get_body=False), which hits the v5 `body-format=none`
+            # bug and is rejected by the API with HTTP 400.
+            current_version = get_current_version(conf, page_id)
             conf.update_page(
                 page_id=page_id,
                 title=title,
                 body=html_content,
+                version=current_version,
             )
             print(f"  ✓ Updated: {title}")
 
