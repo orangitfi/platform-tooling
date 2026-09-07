@@ -21,6 +21,7 @@ from pathlib import Path
 
 import markdown
 from atlassian import ConfluenceV2
+from bs4 import BeautifulSoup, Comment
 
 # ``ConfluenceV2`` emits a blanket DeprecationWarning on construction warning
 # that *V1 methods* are deprecated. We only use V2 methods, so this warning is
@@ -300,6 +301,40 @@ def collect_local_images(md_content, md_file_path):
         else:
             print(f"  Warning: image not found, skipping: {ref}")
     return images
+
+
+def sanitize_storage_html(html_content):
+    """Make markdown-generated HTML valid Confluence storage-format XHTML.
+
+    Confluence's storage format is strict XHTML and returns HTTP 500 (not a
+    clean 400) when the body is malformed. The Python ``markdown`` library emits
+    HTML5 that breaks storage format in several ways:
+
+      * void elements are unclosed (``<br>``, ``<hr>``, ``<img>``) -> must be
+        self-closed (``<br/>``)
+      * named HTML entities (``&nbsp;``, ``&mdash;``, ``&hellip;`` ...) are not
+        defined in storage format -> only ``&amp; &lt; &gt; &quot; &apos;`` and
+        numeric entities are allowed
+      * HTML comments (``<!-- ... -->``) are rejected
+
+    Parsing with ``html.parser`` and re-serializing fixes void tags and decodes
+    named entities to their unicode characters; we additionally strip comments.
+    ``ac:`` / ``ri:`` macro tags produced earlier (images, mermaid) are
+    preserved as-is by the parser.
+    """
+    soup = BeautifulSoup(html_content, "html.parser")
+
+    # Remove HTML comments, which storage format rejects.
+    for comment in soup.find_all(string=lambda t: isinstance(t, Comment)):
+        comment.extract()
+
+    # Confluence storage format does not understand class attributes on <code>
+    # (e.g. class="language-bash"); harmless to drop and avoids odd rendering.
+    for code in soup.find_all("code"):
+        if code.has_attr("class"):
+            del code["class"]
+
+    return str(soup)
 
 
 def upload_attachments(conf, page_id, attachments):
@@ -591,6 +626,12 @@ def publish_docs(
             # --- Replace <img> tags with ac:image macros ---
             if image_map:
                 html_content = replace_images_with_ac_macros(html_content, image_map)
+
+            # --- Sanitize into valid Confluence storage-format XHTML ---
+            # markdown output has unclosed void tags (<br>, <img>), named
+            # entities (&nbsp;, &mdash;) and comments that Confluence rejects
+            # with an opaque HTTP 500 on update. This makes the body well-formed.
+            html_content = sanitize_storage_html(html_content)
 
             # --- Final update with real content ---
             # The v2 update_page auto-increments the version and does not take a
