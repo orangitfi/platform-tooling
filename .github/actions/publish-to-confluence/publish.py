@@ -99,6 +99,42 @@ def get_current_version(conf, page_id):
     return 1
 
 
+def update_page_content(conf, page_id, title, body):
+    """Update a page via an explicit v2 PUT we fully control and can log.
+
+    We build the request body ourselves rather than relying on the library's
+    update_page so that every field is explicit and observable. On failure the
+    exact payload (minus the body text) and full server response are logged,
+    which is essential for diagnosing opaque HTTP 500s from Confluence.
+    """
+    current = conf.get_page_by_id(page_id, get_body=True)
+    if not isinstance(current, dict):
+        raise RuntimeError(f"Unexpected get_page_by_id response for {page_id}: {current!r}")
+
+    version_number = current.get("version", {}).get("number", 1)
+    status = current.get("status", "current")
+
+    payload = {
+        "id": str(page_id),
+        "status": status,
+        "title": title,
+        "body": {"representation": "storage", "value": body},
+        "version": {"number": version_number + 1, "message": "Updated via docs pipeline"},
+    }
+
+    endpoint = conf.get_endpoint("page_by_id", id=page_id)
+    try:
+        return conf.put(endpoint, data=payload)
+    except Exception as exc:
+        detail = _http_error_detail(exc)
+        loggable = {k: v for k, v in payload.items() if k != "body"}
+        loggable["body_len"] = len(body)
+        print(f"  ✗ update failed for page {page_id}: {detail or exc}")
+        print(f"    payload (body omitted): {loggable}")
+        print(f"    body preview: {body[:200]!r}")
+        raise
+
+
 def _http_error_detail(exc):
     """Extract a readable HTTP status + body from a requests HTTPError, if any."""
     resp = getattr(exc, "response", None)
@@ -634,18 +670,9 @@ def publish_docs(
             html_content = sanitize_storage_html(html_content)
 
             # --- Final update with real content ---
-            # The v2 update_page auto-increments the version and does not take a
-            # space or parent_id (hierarchy is set at creation time).
-            # We pass an explicit version so update_page does not internally call
-            # get_page_by_id(get_body=False), which hits the v5 `body-format=none`
-            # bug and is rejected by the API with HTTP 400.
-            current_version = get_current_version(conf, page_id)
-            conf.update_page(
-                page_id=page_id,
-                title=title,
-                body=html_content,
-                version=current_version,
-            )
+            # Use an explicit, fully-logged v2 PUT so opaque HTTP 500s surface
+            # the exact payload and server response for diagnosis.
+            update_page_content(conf, page_id, title, html_content)
             print(f"  ✓ Updated: {title}")
 
     print("\n✓ All pages published successfully!")
